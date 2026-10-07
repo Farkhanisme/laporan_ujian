@@ -43,10 +43,10 @@ const GARI: Partial<ExcelJS.Borders> = {
   right: { style: "thin" },
 };
 
-const LATAR_ABU = {
+/** Judul kolom tanpa warna latar (putih), hanya tebal, rata tengah, bergaris. */
+const TANPA_LATAR = {
   type: "pattern" as const,
-  pattern: "solid" as const,
-  fgColor: { argb: "FFD9D9D9" },
+  pattern: "none" as const,
 };
 
 /**
@@ -84,7 +84,8 @@ export function isiSheetSiswa(ws: ExcelJS.Worksheet, siswa: SiswaData, nilai: Ni
     const cell = ws.getCell(alamat);
     cell.font = { bold: true };
     cell.alignment = RATA_TENGAH;
-    cell.fill = LATAR_ABU;
+    // Tanpa warna latar (putih): judul kolom tetap tebal, rata tengah, bergaris.
+    cell.fill = TANPA_LATAR;
     cell.border = GARI;
   }
 

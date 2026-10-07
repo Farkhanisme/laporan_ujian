@@ -450,6 +450,28 @@ console.log("\n=== F4: isi kopraport (label + nilai) ===");
   cek("C5 = nilai asli 56", v("C5"), 56);
   cek("C5 format angka", ws.getRow(5).getCell(3).numFmt, "0");
 
+  // Judul kolom tanpa warna latar (putih).
+  cek(
+    "judul kolom tanpa background",
+    ["A4", "B4", "C4", "D4"].every((a) => {
+      const f = ws.getCell(a).fill as { pattern?: string } | undefined;
+      return !f || f.pattern === "none";
+    }),
+    true
+  );
+  cek(
+    "tidak ada warna latar abu di sheet",
+    ["A4", "B4", "C4", "D4", "A5", "B5", "C5", "D5"].every((a) => {
+      const f = ws.getCell(a).fill as { pattern?: string; fgColor?: { argb?: string } } | undefined;
+      return !f || f.pattern === "none" || f.fgColor?.argb !== "FFD9D9D9";
+    }),
+    true
+  );
+  // Tulisan judul tetap pekat, rata tengah, dan bergaris.
+  cek("judul kolom tetap tebal", ["A4", "B4", "C4", "D4"].every((a) => ws.getCell(a).font?.bold === true), true);
+  cek("judul kolom tetap rata tengah", ws.getCell("A4").alignment?.horizontal, "center");
+  cek("judul kolom tetap bergaris", !!ws.getCell("A4").border?.top, true);
+
   // Kop Bold.
   cek("A1:D3 bold", ["A1", "B1", "C1", "D1", "A3", "D3"].every((a) => ws.getCell(a).font?.bold === true), true);
 
