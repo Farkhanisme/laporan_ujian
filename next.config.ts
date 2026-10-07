@@ -5,8 +5,10 @@ const nextConfig: NextConfig = {
   experimental: {
     agentFeedback: true,
   },
-  cacheComponents: true,
-  partialPrefetching: true,
+  // Aplikasi ini sepenuhnya dinamis (data dari Turso per permintaan),
+  // jadi cache components tidak perlu dan hanya menambah batasan.
+  cacheComponents: false,
+  
   turbopack: {
     rules: {
       "*.css": {

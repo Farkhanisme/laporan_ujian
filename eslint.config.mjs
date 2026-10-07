@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Skrip uji tidak ikut lint/tsc: memanggil handler API dengan Request
+    // biasa dan memakai `any` untuk data uji.
+    "scripts/**",
   ]),
 ]);
 

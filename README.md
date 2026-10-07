@@ -1,36 +1,112 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Aplikasi Raport & Dongkrak Nilai ASTS
 
-## Getting Started
+**MTsS MA'ARIF TIENG** · Tahun ajaran 2026/2027 · Semester GANJIL
 
-First, run the development server:
+Aplikasi web untuk satu pengguna (pemilik), **tanpa login**, yang hanya berisi nilai ASTS:
+mengelola data siswa, mendongkrak nilai lewat satu aturan rentang → target, mengunduh raport
+per siswa, dan mengunduh semua nilai dalam satu file Excel (satu sheet per siswa).
+
+## Teknologi
+
+| Bagian | Pilihan |
+|---|---|
+| Framework | Next.js (App Router), TypeScript |
+| Database | Turso (libSQL/SQLite) via `@libsql/client` |
+| Excel | `exceljs`, di server |
+| UI | Tailwind CSS + shadcn/ui |
+| Validasi | Zod |
+
+## Menyiapkan
+
+### 1. Install dependensi
+
+```bash
+npm install
+```
+
+### 2. Isi variabel lingkungan
+
+```bash
+cp .env.example .env.local
+```
+
+Isi `TURSO_DATABASE_URL` dan `TURSO_AUTH_TOKEN`. Jangan pernah memakai awalan `NEXT_PUBLIC_` —
+token hanya dibaca di server.
+
+Berkas yang sama dibaca otomatis oleh `db:seed` dan `db:migrate`, jadi env tidak perlu
+diset ulang untuk menjalankan skrip tersebut.
+
+Untuk Vercel: Settings → Environment Variables, tambahkan `TURSO_DATABASE_URL` dan
+`TURSO_AUTH_TOKEN` (tanpa `NEXT_PUBLIC_`). Seed dan migrasi cukup dijalankan satu kali
+dari komputer lokal — Vercel hanya butuh dua variabel itu.
+
+### 3. Jalankan seed (data awal)
+
+```bash
+npm run db:seed
+```
+
+Membaca `specs/seed_asts_turso.sql` dan mengirimnya ke database memakai `@libsql/client`
+— **tidak perlu Turso CLI**. Skrip memverifikasi hasilnya dan berhenti dengan pesan jelas
+bila jumlahnya bukan 128 siswa / 48 mapel / 2.048 nilai.
+
+> Seed diawali `DROP TABLE IF EXISTS`, jadi menjalankannya akan **menghapus semua data yang
+> ada**. Bila database sudah berisi siswa, skrip menolak jalan dan meminta `--force`:
+> ```bash
+> npm run db:seed -- --force
+> ```
+
+### 4. Jalankan migrasi
+
+```bash
+npm run db:migrate
+```
+
+Membuat tabel `aturan_dongkrak`. Aman dijalankan berulang kali.
+
+### 5. Jalankan aplikasi
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Skrip
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Perintah | Kegunaan |
+|---|---|
+| `npm run dev` | Server pengembangan |
+| `npm run build` | Build produksi |
+| `npm run start` | Menjalankan hasil build |
+| `npm run db:seed` | Mengisi database dari `specs/seed_asts_turso.sql` (menghapus data lama) |
+| `npm run db:migrate` | Menjalankan berkas SQL di `db/` |
+| `npm run lint` | ESLint |
+| `npm run cek:logic` | Uji logika murni: predikat, urutan mapel & siswa, nama sheet, perpindahan kelas |
+| `npm run cek:api` | Uji end-to-end handler API terhadap database lokal dari seed (80 pemeriksaan) |
+| `npm run cek:siapkan` | Menyiapkan ulang `scripts/cek-api.sqlite` dari seed + migrasi |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+`cek:api` membuat salinan database uji sendiri di `scripts/cek-api.sqlite`, jadi tidak
+pernah menyentuh database Turso Anda.
 
-## Learn More
+## Konsep penting
 
-To learn more about Next.js, take a look at the following resources:
+**Nilai akhir** = `COALESCE(nilai_dongkrak, nilai_asli)`. Predikat dihitung dari nilai akhir:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Predikat | Nilai akhir |
+|---|---|
+| A | 93–100 |
+| B | 85–92 |
+| C | 77–84 |
+| D | 0–76 |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**Aturan dongkrak.** Hanya satu aturan berlaku pada satu waktu:
 
-## Deploy on Vercel
+> Semua nilai asli dari [awal] sampai [akhir] (inklusif) diubah menjadi [target].
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Menerapkan aturan baru **menimpa** yang lama: seluruh `nilai_dongkrak` dikosongkan lebih dulu,
+lalu dihitung ulang dari `nilai_asli`. `nilai_asli` tidak pernah diubah oleh proses ini.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Keamanan
+
+Aplikasi ini **tanpa login**. Siapa pun yang bisa membuka alamatnya dapat mengubah nilai.
+Karena itu jalankan secara lokal, atau di balik perlindungan jaringan/password di tingkat
+hosting. Jangan dipublikasikan terbuka.

@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Database uji lokal (dibuat oleh npm run cek:siapkan)
+scripts/*.sqlite
+scripts/*.sqlite-*
