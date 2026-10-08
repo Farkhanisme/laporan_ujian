@@ -1,6 +1,5 @@
-import { PageTitle } from "@/components/page-title";
+import { PageHeader } from "@/components/page-header";
 import { SiswaForm } from "@/components/siswa/siswa-form";
-
 
 export default async function SiswaEditPage({
   params,
@@ -10,10 +9,14 @@ export default async function SiswaEditPage({
   const { id } = await params;
 
   return (
-    <div className="space-y-4">
-      <PageTitle
+    <div className="space-y-5">
+      <PageHeader
         title="Edit Siswa"
         description="Perbarui nama, kelas, NIS, dan NISN."
+        remah={[
+          { label: "Siswa", href: "/siswa" },
+          { label: `Siswa #${id}` },
+        ]}
       />
       <SiswaForm siswaId={id} />
     </div>

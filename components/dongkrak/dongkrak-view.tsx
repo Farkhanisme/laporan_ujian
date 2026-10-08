@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,7 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -29,7 +30,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, Eye, Check, RotateCcw } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
+import { cn } from "@/lib/utils";
+import { ArrowRight, Check, Eye, Loader2, Minus, RotateCcw, Sparkles, TrendingUp } from "lucide-react";
 
 interface Aturan {
   nilai_awal: number;
@@ -44,6 +47,14 @@ interface Preview {
   jumlahDongkrakAktif: number;
   contoh: Array<{ siswa: string; mapel: string; nilai_asli: number; nilai_target: number }>;
 }
+
+/** Rentang yang sering dipakai untuk menaikkan nilai kelompok bawah. */
+const PRESET = [
+  { label: "60–69 → 70", awal: "60", akhir: "69", target: "70" },
+  { label: "65–74 → 75", awal: "65", akhir: "74", target: "75" },
+  { label: "70–79 → 80", awal: "70", akhir: "79", target: "80" },
+  { label: "75–84 → 85", awal: "75", akhir: "84", target: "85" },
+];
 
 export function DongkrakView() {
   const [aturan, setAturan] = useState<Aturan | null>(null);
@@ -103,17 +114,29 @@ export function DongkrakView() {
     }
   }, []);
 
-  const nilaiValid =
-    [awal, akhir, target].every((v) => v !== "" && Number.isInteger(Number(v))) &&
-    Number(awal) >= 0 &&
-    Number(awal) <= 100 &&
-    Number(akhir) >= 0 &&
-    Number(akhir) <= 100 &&
-    Number(target) >= 0 &&
-    Number(target) <= 100 &&
-    Number(awal) <= Number(akhir);
+  // Pesan validasi per field, muncul di bawah input — bukan hanya tombol
+  // yang diam-diam nonaktif.
+  const pesan = useMemo(() => {
+    const kosong = [awal, akhir, target].some((v) => v.trim() === "");
+    if (kosong) return null;
+
+    const angka = [awal, akhir, target].map(Number);
+    if (angka.some((n) => !Number.isInteger(n) || n < 0 || n > 100)) {
+      return { field: "semua", text: "Semua isian harus bilangan bulat 0–100." };
+    }
+    if (Number(awal) > Number(akhir)) {
+      return { field: "akhir", text: "Nilai akhir tidak boleh lebih kecil dari nilai awal." };
+    }
+    return null;
+  }, [awal, akhir, target]);
+
+  const nilaiValid = pesan === null && [awal, akhir, target].every((v) => v.trim() !== "");
 
   const adaPeringatan = nilaiValid && Number(target) < Number(akhir);
+
+  // `ubahField` mengosongkan preview setiap kali isian berubah, jadi preview
+  // yang ada pasti dibuat dari isian terkini.
+  const pratinjauSesuai = preview !== null && nilaiValid;
 
   async function pratinjau() {
     setPratinjauLoading(true);
@@ -183,163 +206,237 @@ export function DongkrakView() {
     }
   }
 
+  function ubahField(setter: (v: string) => void, nilai: string) {
+    setter(nilai);
+    // Pratinjau tidak lagi boleh dipakai begitu isiannya berubah.
+    setPreview(null);
+  }
+
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <Card>
-        <CardHeader>
-          <CardTitle>Aturan yang sedang berlaku</CardTitle>
-          <CardDescription>
-            Hanya satu aturan berlaku pada satu waktu.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {loading ? (
-            <div className="flex h-16 items-center justify-center">
-              <Loader2 className="size-5 animate-spin text-muted-foreground" />
-            </div>
-          ) : aturan ? (
-            <>
-              <p className="text-lg font-semibold">
-                Nilai {aturan.nilai_awal}–{aturan.nilai_akhir} diubah menjadi {aturan.nilai_target}
-              </p>
-              <dl className="grid grid-cols-2 gap-2 text-sm">
-                <dt className="text-muted-foreground">Diterapkan</dt>
-                <dd>{new Date(aturan.diterapkan_pada).toLocaleString("id-ID")}</dd>
-                <dt className="text-muted-foreground">Nilai terdampak</dt>
-                <dd>{jumlahTerdampak} nilai</dd>
-              </dl>
-              <Button variant="outline" onClick={() => setDialogReset(true)}>
-                <RotateCcw className="size-4" />
-                Reset dongkrak
-              </Button>
-            </>
-          ) : (
-            <p className="text-sm text-muted-foreground">Belum ada aturan dongkrak.</p>
-          )}
-        </CardContent>
-      </Card>
+    <div className="space-y-4">
+      {/* Status aturan aktif: yang paling sering dicek, jadi paling atas. */}
+      {loading ? (
+        <Card>
+          <CardContent className="flex h-24 items-center justify-center">
+            <Loader2 className="size-5 animate-spin text-muted-foreground" />
+          </CardContent>
+        </Card>
+      ) : aturan ? (
+        <Card className="border-brand/25 bg-brand-subtle/40">
+          <CardHeader>
+            <CardDescription className="flex items-center gap-1.5 font-medium text-brand">
+              <TrendingUp className="size-4" aria-hidden />
+              Aturan yang sedang berlaku
+            </CardDescription>
+            <CardTitle className="tabular flex flex-wrap items-center gap-2 text-2xl">
+              <span className="rounded-lg bg-card px-2.5 py-1 ring-1 ring-brand/25">
+                {aturan.nilai_awal}&ndash;{aturan.nilai_akhir}
+              </span>
+              <ArrowRight className="size-5 text-brand" aria-hidden />
+              <span className="rounded-lg bg-brand px-2.5 py-1 text-brand-foreground">
+                {aturan.nilai_target}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardFooter className="flex flex-wrap items-center justify-between gap-3 border-brand/15 bg-transparent">
+            <p className="tabular text-sm text-muted-foreground">
+              {jumlahTerdampak} nilai terdampak · diterapkan{" "}
+              {new Date(aturan.diterapkan_pada).toLocaleString("id-ID")}
+            </p>
+            <Button variant="outline" size="sm" onClick={() => setDialogReset(true)}>
+              <RotateCcw className="size-4" />
+              Reset dongkrak
+            </Button>
+          </CardFooter>
+        </Card>
+      ) : (
+        <Alert>
+          <TrendingUp className="size-4" />
+          <AlertTitle>Belum ada aturan dongkrak</AlertTitle>
+          <AlertDescription>
+            Nilai akhir saat ini sama dengan nilai asli. Buat aturan di bawah bila ingin menaikkan
+            nilai kelompok tertentu.
+          </AlertDescription>
+        </Alert>
+      )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Aturan baru</CardTitle>
-          <CardDescription>
-            Semua nilai asli pada rentang tersebut diubah menjadi nilai target.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="awal">Nilai awal</Label>
-              <Input
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+        <Card>
+          <CardHeader>
+            <CardTitle>Aturan baru</CardTitle>
+            <CardDescription>
+              Semua nilai asli pada rentang tersebut diubah menjadi nilai target. Nilai asli
+              tidak pernah berubah.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <FieldNilai
                 id="awal"
-                type="number"
-                min={0}
-                max={100}
-                step={1}
-                value={awal}
-                onChange={(e) => {
-                  setAwal(e.target.value);
-                  setPreview(null);
-                }}
+                label="Nilai awal"
+                nilai={awal}
+                onChange={(v) => ubahField(setAwal, v)}
+                error={pesan?.field === "akhir" || pesan?.field === "semua" ? pesan.text : null}
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="akhir">Nilai akhir</Label>
-              <Input
+              <FieldNilai
                 id="akhir"
-                type="number"
-                min={0}
-                max={100}
-                step={1}
-                value={akhir}
-                onChange={(e) => {
-                  setAkhir(e.target.value);
-                  setPreview(null);
-                }}
+                label="Nilai akhir"
+                nilai={akhir}
+                onChange={(v) => ubahField(setAkhir, v)}
+                error={pesan?.field === "akhir" ? pesan.text : null}
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="target">Nilai target</Label>
-              <Input
+              <FieldNilai
                 id="target"
-                type="number"
-                min={0}
-                max={100}
-                step={1}
-                value={target}
-                onChange={(e) => {
-                  setTarget(e.target.value);
-                  setPreview(null);
-                }}
+                label="Nilai target"
+                nilai={target}
+                onChange={(v) => ubahField(setTarget, v)}
+                error={pesan?.field === "semua" ? pesan.text : null}
               />
             </div>
-          </div>
 
-          {adaPeringatan ? (
-            <Alert>
-              <AlertTitle>Perhatian</AlertTitle>
-              <AlertDescription>
-                Nilai target lebih kecil dari batas akhir rentang; sebagian nilai bisa turun.
-              </AlertDescription>
-            </Alert>
-          ) : null}
-
-          <Button onClick={pratinjau} disabled={!nilaiValid || pratinjauLoading}>
-            {pratinjauLoading ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
-            Pratinjau
-          </Button>
-
-          <Button onClick={() => setDialogTerapkan(true)} disabled={!preview}>
-            <Check className="size-4" />
-            Terapkan
-          </Button>
-
-          {preview ? (
-            <div className="space-y-2 rounded-md border p-3">
-              <p className="text-sm">
-                <span className="font-medium">{preview.jumlahTerdampak}</span> nilai akan
-                terdampak, <span className="font-medium">{preview.jumlahNol}</span> di antaranya
-                bernilai 0 (bisa jadi mapel tanpa nilai).
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {preview.jumlahDongkrakAktif} hasil dongkrak yang sedang ada akan diganti.
-              </p>
-
-              {preview.contoh.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Siswa</TableHead>
-                      <TableHead>Mapel</TableHead>
-                      <TableHead className="text-center">Asli</TableHead>
-                      <TableHead className="text-center">Target</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {preview.contoh.map((c, i) => (
-                      <TableRow key={i}>
-                        <TableCell>{c.siswa}</TableCell>
-                        <TableCell>{c.mapel}</TableCell>
-                        <TableCell className="text-center">{c.nilai_asli}</TableCell>
-                        <TableCell className="text-center font-medium">{c.nilai_target}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : null}
+            <div className="space-y-1.5">
+              <p className="text-xs text-muted-foreground">Preset cepat</p>
+              <div className="flex flex-wrap gap-1.5">
+                {PRESET.map((p) => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    onClick={() => {
+                      setAwal(p.awal);
+                      setAkhir(p.akhir);
+                      setTarget(p.target);
+                      setPreview(null);
+                    }}
+                    className="tabular rounded-lg border bg-card px-2.5 py-1.5 text-xs font-medium transition-colors hover:border-brand/40 hover:bg-brand-subtle hover:text-brand focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          ) : null}
-        </CardContent>
-      </Card>
+
+            {adaPeringatan ? (
+              <Alert>
+                <AlertTitle>Perhatian</AlertTitle>
+                <AlertDescription>
+                  Nilai target lebih kecil dari batas akhir rentang; sebagian nilai bisa turun.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            <Button onClick={pratinjau} disabled={!nilaiValid || pratinjauLoading}>
+              {pratinjauLoading ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Eye className="size-4" />
+              )}
+              Lihat pratinjau dampak
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Pratinjau</CardTitle>
+            <CardDescription>
+              {pratinjauSesuai
+                ? "Periksa dulu sebelum aturan diterapkan."
+                : "Isi ketiga kolom, lalu buat pratinjau untuk melihat dampaknya."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {!pratinjauSesuai || !preview ? (
+              <EmptyState
+                icon={Sparkles}
+                title="Belum ada pratinjau"
+                description="Pratinjau menunjukkan berapa nilai yang terdampak dan contohnya, sebelum ada perubahan ke database."
+              />
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-2">
+                  <Angka
+                    label="Nilai terdampak"
+                    nilai={preview.jumlahTerdampak}
+                    nada="brand"
+                  />
+                  <Angka label="Bernilai 0" nilai={preview.jumlahNol} />
+                  <Angka
+                    label="Dongkrak lama diganti"
+                    nilai={preview.jumlahDongkrakAktif}
+                    nada="peringatan"
+                  />
+                </div>
+
+                {preview.jumlahNol > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Nilai 0 ikut masuk rentang. Sebagian bisa mapel yang memang belum diisi.
+                  </p>
+                ) : null}
+
+                {preview.contoh.length > 0 ? (
+                  <div className="overflow-hidden rounded-lg border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="hover:bg-transparent">
+                          <TableHead>Siswa</TableHead>
+                          <TableHead>Mapel</TableHead>
+                          <TableHead className="w-24 text-center">Asli</TableHead>
+                          <TableHead className="w-28 text-center">Jadi</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {preview.contoh.map((c, i) => {
+                          const turun = c.nilai_target < c.nilai_asli;
+                          return (
+                            <TableRow key={i} className="h-9">
+                              <TableCell className="max-w-40 truncate">{c.siswa}</TableCell>
+                              <TableCell className="max-w-40 truncate">{c.mapel}</TableCell>
+                              <TableCell className="tabular text-center text-muted-foreground">
+                                {c.nilai_asli}
+                              </TableCell>
+                              <TableCell className="tabular text-center">
+                                <span
+                                  className={cn(
+                                    "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-semibold ring-1 ring-inset",
+                                    turun
+                                      ? "bg-rose-50 text-rose-700 ring-rose-600/20 dark:bg-rose-500/15 dark:text-rose-300"
+                                      : "bg-brand-subtle text-brand ring-brand/20"
+                                  )}
+                                >
+                                  {turun ? (
+                                    <Minus className="size-3" aria-hidden />
+                                  ) : (
+                                    <ArrowRight className="size-3" aria-hidden />
+                                  )}
+                                  {c.nilai_target}
+                                </span>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : null}
+
+                <Button className="w-full" onClick={() => setDialogTerapkan(true)}>
+                  <Check className="size-4" />
+                  Terapkan aturan
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       <Dialog open={dialogTerapkan} onOpenChange={setDialogTerapkan}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Terapkan aturan?</DialogTitle>
             <DialogDescription>
-              Menerapkan aturan ini akan menghapus hasil dongkrak sebelumnya (
-              {preview?.jumlahDongkrakAktif ?? 0} nilai) dan menggantinya dengan aturan baru.
-              Lanjutkan?
+              Nilai asli {awal}&ndash;{akhir} akan menjadi {target}. Menerapkan aturan ini juga
+              menghapus hasil dongkrak sebelumnya ({preview?.jumlahDongkrakAktif ?? 0} nilai) dan
+              menggantinya dengan yang baru. Nilai asli tidak berubah.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -347,7 +444,11 @@ export function DongkrakView() {
               Batal
             </Button>
             <Button onClick={terapkan} disabled={menerapkan}>
-              {menerapkan ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+              {menerapkan ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Check className="size-4" />
+              )}
               Terapkan
             </Button>
           </DialogFooter>
@@ -368,12 +469,77 @@ export function DongkrakView() {
               Batal
             </Button>
             <Button variant="destructive" onClick={reset} disabled={menerapkan}>
-              {menerapkan ? <Loader2 className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}
+              {menerapkan ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <RotateCcw className="size-4" />
+              )}
               Reset
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function FieldNilai({
+  id,
+  label,
+  nilai,
+  onChange,
+  error,
+}: {
+  id: string;
+  label: string;
+  nilai: string;
+  onChange: (v: string) => void;
+  error: string | null;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type="number"
+        inputMode="numeric"
+        min={0}
+        max={100}
+        step={1}
+        value={nilai}
+        onChange={(e) => onChange(e.target.value)}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${id}-error` : undefined}
+        className={cn("tabular h-9", error && "border-destructive")}
+      />
+      {error ? (
+        <p id={`${id}-error`} className="text-xs text-destructive">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function Angka({
+  label,
+  nilai,
+  nada = "netral",
+}: {
+  label: string;
+  nilai: number;
+  nada?: "netral" | "brand" | "peringatan";
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-lg border px-3 py-2",
+        nada === "brand" && "border-brand/25 bg-brand-subtle/50",
+        nada === "peringatan" && "border-amber-600/20 bg-amber-50 dark:bg-amber-500/10"
+      )}
+    >
+      <p className="tabular text-lg font-semibold leading-tight">{nilai}</p>
+      <p className="text-[0.7rem] leading-tight text-muted-foreground">{label}</p>
     </div>
   );
 }
