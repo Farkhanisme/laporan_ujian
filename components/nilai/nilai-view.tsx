@@ -23,7 +23,7 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { predikat, type Predikat } from "@/lib/predikat";
 import { urutanMapel } from "@/lib/urutan";
-import { Loader2, Download, Save, X, Pencil } from "lucide-react";
+import { Loader2, Download, Save, X, Pencil, TableProperties } from "lucide-react";
 
 const KELAS = ["7A", "7B", "8A", "8B", "9"];
 const SEMUA_MAPEL = "semua";
@@ -60,6 +60,7 @@ export function NilaiView({ mapelAwal }: { mapelAwal?: string }) {
   const [draft, setDraft] = useState<Record<number, string>>({});
   const [saving, setSaving] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [downloadingRingkasan, setDownloadingRingkasan] = useState(false);
 
   // Daftar siswa di kelas terpilih (untuk dropdown).
   useEffect(() => {
@@ -251,6 +252,26 @@ export function NilaiView({ mapelAwal }: { mapelAwal?: string }) {
     }
   }
 
+  async function unduhRingkasan() {
+    setDownloadingRingkasan(true);
+    try {
+      const res = await fetch("/api/export/ringkasan");
+      if (!res.ok) throw new Error("Gagal membuat file.");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "ringkasan_nilai_ASTS_GANJIL_2026-2027.xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Ringkasan nilai berhasil diunduh.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Gagal mengunduh.");
+    } finally {
+      setDownloadingRingkasan(false);
+    }
+  }
+
   const jumlahDiubah = Object.keys(draft).length;
 
   return (
@@ -329,6 +350,15 @@ export function NilaiView({ mapelAwal }: { mapelAwal?: string }) {
               </Button>
             </>
           ) : null}
+
+          <Button variant="outline" onClick={unduhRingkasan} disabled={downloadingRingkasan}>
+            {downloadingRingkasan ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <TableProperties className="size-4" />
+            )}
+            Unduh Ringkasan
+          </Button>
 
           <Button variant="outline" onClick={unduhSemua} disabled={downloading}>
             {downloading ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}

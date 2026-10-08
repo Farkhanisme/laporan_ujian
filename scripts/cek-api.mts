@@ -24,6 +24,7 @@ const { POST: postPreview } = await import("../app/api/dongkrak/preview/route");
 const { GET: getRaport } = await import("../app/api/export/raport/[siswaId]/route");
 const { GET: getSemua } = await import("../app/api/export/semua/route");
 const { GET: getMapel, POST: postMapel } = await import("../app/api/mapel/route");
+const { GET: getRingkasan } = await import("../app/api/export/ringkasan/route");
 
 const db = createClient({ url: process.env.TURSO_DATABASE_URL });
 
@@ -490,6 +491,143 @@ console.log("\n=== F4: isi kopraport (label + nilai) ===");
   cek("nama siswa tidak jadi kapital", v("B1"), "AHMAD RIFA`I");
   cek("nama madrasah tidak jadi kapital", v("D1"), "MTsS MA'ARIF TIENG");
   cek("kelas/semester tidak jadi kapital", v("D2"), "7A/GANJIL");
+}
+
+console.log("\n=== ringkasan nilai: satu sheet, nilai akhir per mapel ===");
+{
+  const res = await getRingkasan(req("/api/export/ringkasan"));
+  cek("status 200", res.status, 200);
+  cek(
+    "tipe konten xlsx",
+    res.headers.get("content-type"),
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  cekBenar(
+    "nama berkas benar",
+    (res.headers.get("content-disposition") ?? "").includes("ringkasan_nilai_ASTS_GANJIL_2026-2027.xlsx")
+  );
+
+  const buf = Buffer.from(await res.arrayBuffer());
+  cek("menghasilkan .xlsx (PK zip)", buf.subarray(0, 2).toString(), "PK");
+
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf as any);
+  const ws = wb.worksheets[0];
+  const g = (a: string) => ws.getCell(a).value;
+
+  // Header baris 1: NO | NAMA | NISN | TTL | KELAS + 16 mapel.
+  cek("jumlah kolom = 21", ws.columnCount, 21);
+  cek("jumlah baris = 129 (1 header + 128 siswa)", ws.rowCount, 129);
+
+  cek("A1 = NO", g("A1"), "NO");
+  cek("B1 = NAMA", g("B1"), "NAMA");
+  cek("C1 = NISN", g("C1"), "NISN");
+  cek("D1 = TTL", g("D1"), "TTL");
+  cek("E1 = KELAS", g("E1"), "KELAS");
+
+  const mapelUrut = [
+    "Akidah Akhlak", "Al-Quran Hadis", "Bahasa Arab", "Bahasa Indonesia",
+    "Bahasa Inggris", "Bahasa Jawa", "Fikih", "Informatika", "IPA", "IPS",
+    "Ke-NU-an", "Matematika", "Pendidikan Pancasila", "PJOK",
+    "Sejarah Kebudayaan Islam", "Seni Budaya",
+  ];
+  cek("16 header mapel sesuai urutan abjad", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map((i) => ws.getCell(1, 5 + i).value), mapelUrut);
+
+  // Data siswa pertama. Catatan: "ADITYA" urut sebelum "AHMAD" secara abjad,
+  // jadi baris pertama bukan AHMAD RIFA`I.
+  cek("A2 = nomor urut 1", g("A2"), 1);
+  cek("B2 = nama siswa pertama (abjad)", g("B2"), "ADITYA AINURROCHMAN");
+  cek("E2 = kelas", g("E2"), "7A");
+
+  // Field kosong harus kosong tanpa teks pengganti.
+  cek("NISN kosong = sel kosong", ws.getCell("C2").value, null);
+  cek("TTL kosong = sel kosong", ws.getCell("D2").value, null);
+  cek(
+    "tidak ada sel identitas berisi '-' atau 'Kosong'",
+    Array.from({ length: 128 }, (_, i) => ws.getRow(i + 2).getCell(3).value).every(
+      (v) => v === null || typeof v === "string"
+    ),
+    true
+  );
+  cek(
+    "kolom TTL kosong di semua 128 baris",
+    Array.from({ length: 128 }, (_, i) => ws.getRow(i + 2).getCell(4).value).every((v) => v === null),
+    true
+  );
+
+  // Cari baris AHMAD RIFA`I untuk memeriksa nilainya (spec 8.2).
+  const barisContoh = Array.from({ length: 128 }, (_, i) => i + 2).find(
+    (r) => ws.getRow(r).getCell(2).value === "AHMAD RIFA`I"
+  )!;
+  cek("baris AHMAD RIFA`I ditemukan", typeof barisContoh, "number");
+  cek("kolom Akidah Akhlak = 56", ws.getCell(barisContoh, 6).value, 56);
+  cek("kolom IPA = 28", ws.getCell(barisContoh, 5 + mapelUrut.indexOf("IPA") + 1).value, 28);
+  cek("kolom Seni Budaya = 40", ws.getCell(barisContoh, 5 + mapelUrut.indexOf("Seni Budaya") + 1).value, 40);
+  cek("nilai berupa angka bulat", typeof ws.getCell(barisContoh, 6).value, "number");
+  cek("nilai format angka", ws.getCell(barisContoh, 6).numFmt, "0");
+
+  // Kolom terakhir (U) = Seni Budaya.
+  cek("kolom U = Seni Budaya", ws.getCell(1, 21).value, "Seni Budaya");
+
+  // Baris terakhir siswa ke-128.
+  cek("A129 = nomor urut 128", g("A129"), 128);
+  cek("B129 = ZOYA LAILA ANDINI", g("B129"), "ZOYA LAILA ANDINI");
+  cek("E129 = kelas 9", g("E129"), "9");
+  cek("tidak ada baris ke-130", ws.getRow(130).getCell(1).value, null);
+
+  // Urutan kelas lalu nama: kelas berganti monoton dan tidak terbalik.
+  const kelasKolom = Array.from({ length: 128 }, (_, i) => String(ws.getRow(i + 2).getCell(5).value));
+  cek(
+    "kelas terurut 7A lalu 7B lalu 8A lalu 8B lalu 9",
+    [...new Set(kelasKolom)],
+    ["7A", "7B", "8A", "8B", "9"]
+  );
+  cek(
+    "nama urut abjad di dalam tiap kelas",
+    kelasKolom.every((k, i) => {
+      if (i === 0 || kelasKolom[i - 1] !== k) return true;
+      const a = String(ws.getRow(i + 2).getCell(2).value);
+      const b = String(ws.getRow(i + 1).getCell(2).value);
+      return a.localeCompare(b, undefined, { sensitivity: "base" }) > 0;
+    }),
+    true
+  );
+
+  // Nilai harus nilai akhir: terapkan dongkrak lalu unduh ulang.
+  await postDongkrak(bodyReq("/api/dongkrak", { nilai_awal: 0, nilai_akhir: 30, nilai_target: 30 }));
+  const res2 = await getRingkasan(req("/api/export/ringkasan"));
+  const wb2 = new ExcelJS.Workbook();
+  await wb2.xlsx.load(Buffer.from(await res2.arrayBuffer()) as any);
+  const ws2 = wb2.worksheets[0];
+  // Baris AHMAD RIFA'I: Akidah 56 (di luar rentang), IPA 28 -> 30.
+  const barisAhmad = Array.from({ length: 128 }, (_, i) => i + 2).find((r) => ws2.getRow(r).getCell(2).value === "AHMAD RIFA`I")!;
+  const kolIpa = 5 + mapelUrut.indexOf("IPA") + 1;
+  cek("ringkasan memakai nilai AKHIR (IPA 28 -> 30)", ws2.getRow(barisAhmad).getCell(kolIpa).value, 30);
+  cek("nilai di luar rentang tetap (Akidah 56)", ws2.getRow(barisAhmad).getCell(6).value, 56);
+  await deleteDongkrak(req("/api/dongkrak"));
+
+  // Format header: bold, tanpa background, membungkus.
+  cek("header bold", ws.getCell("F1").font?.bold, true);
+  cek(
+    "header tanpa background",
+    (ws.getCell("F1").fill as { pattern?: string })?.pattern === "none",
+    true
+  );
+  cek("header mapel wrapText", ws.getCell("F1").alignment?.wrapText, true);
+  cek("tinggi baris header", ws.getRow(1).height, 42);
+
+  // Lebar kolom.
+  cek("lebar kolom identitas", [1, 2, 3, 4, 5].map((i) => ws.getColumn(i).width), [5, 34, 12, 12, 8]);
+  cek("lebar kolom mapel 8", ws.getColumn(6).width, 8);
+  cek("lebar kolom terakhir 8", ws.getColumn(21).width, 8);
+
+  // Pengaturan cetak: landscape, hanya lebar yang dipaksakan.
+  const ps = ws.pageSetup as any;
+  cek("orientasi landscape", ps.orientation, "landscape");
+  cek("fitToWidth 1", ps.fitToWidth, 1);
+  cek("fitToHeight 0 (tinggi bebas)", ps.fitToHeight, 0);
+  cek("printArea A1:U129", ps.printArea, "A1:U129");
+  cek("freeze header (ySplit 1)", ws.views?.[0]?.ySplit, 1);
 }
 
 console.log("\n=== mapel: daftar, tambah, dan dampaknya ===");
