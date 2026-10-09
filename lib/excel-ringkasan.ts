@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { deskripsiNilai, predikat, predikatDenganKeterangan } from "./predikat";
 
 export interface RingkasanSiswa {
   id: number;
@@ -15,9 +16,23 @@ export interface RingkasanBaris {
 
 export const HEADER_IDENTITAS = ["NO", "NAMA", "NISN", "TTL", "KELAS"] as const;
 
-/** Lebar kolom identitas; kolom mapel memakai LEBAR_MAPEL. */
+/** Baris judul kelompok di bawah nama mapel, diulang tiap mapel. */
+export const HEADER_MAPEL = ["NILAI", "PREDIKAT", "DESKRIPSI"] as const;
+
+/** Lebar kolom identitas; tiap mapel memakai LEBAR_MAPEL (nilai, predikat, deskripsi). */
 export const LEBAR_IDENTITAS = [5, 34, 12, 12, 8];
-export const LEBAR_MAPEL = 8;
+/** Lebar kolom nilai, predikat ("A (Sangat Baik)"), dan deskripsi ("Belum Tuntas"). */
+export const LEBAR_MAPEL = [7, 16, 14];
+
+const BARIS_HEADER_MAPEL = 1;
+const BARIS_HEADER_SUB = 2;
+const BARIS_DATA_PERTAMA = 3;
+
+/**
+ * A3 tidak ada di enum `PaperSize` ExcelJS (yang isinya A4 = 9), tapi angka 8
+ * tetap ditulis apa adanya ke XML dan dibaca Excel sebagai A3.
+ */
+const KERTAS_A3 = 8 as ExcelJS.PaperSize;
 
 const RATA_TENGAH = {
   horizontal: "center" as const,
@@ -43,10 +58,15 @@ const TANPA_LATAR = {
 };
 
 /**
- * Ringkasan nilai: satu sheet, header di baris 1, data mulai baris 2.
+ * Ringkasan nilai: satu sheet, dua baris header, data mulai baris 3.
  *
- * Kolom: NO | NAMA | NISN | TTL | KELAS | <satu kolom per mapel>
- * Field yang belum ada (NISN, TTL) dibiarkan kosong — tanpa teks pengganti.
+ * Kolom: NO | NAMA | NISN | TTL | KELAS | <3 kolom per mapel>
+ *   tiap mapel memakai tiga kolom: nilai (angka), predikat ("B (Baik)"),
+ *   dan deskripsi ketuntasan ("Tuntas" / "Belum Tuntas").
+ * Baris 1 berisi nama mapel di-merge tiga kolom, baris 2 berisi
+ * NILAI | PREDIKAT | DESKRIPSI. Kolom identitas di-merge baris 1-2.
+ * Field yang belum ada (NISN, TTL, nilai mapel) dibiarkan kosong —
+ * tanpa teks pengganti.
  *
  * @param mapelNama daftar nama mapel, sudah berurutan; menentukan urutan kolom
  */
@@ -56,12 +76,20 @@ export function isiSheetRingkasan(
   mapelNama: string[]
 ) {
   const kolomIdentitas = HEADER_IDENTITAS.length;
-  const totalKolom = kolomIdentitas + mapelNama.length;
+  const kolomPerMapel = HEADER_MAPEL.length;
+  const totalKolom = kolomIdentitas + mapelNama.length * kolomPerMapel;
 
-  // --- Header baris 1 ---
-  ws.getRow(1).height = 42;
+  /** Kolom pertama (1) dari mapel ke-`i`. */
+  const kolomMapel = (i: number) => kolomIdentitas + i * kolomPerMapel + 1;
+
+  // --- Header baris 1 dan 2 ---
+  ws.getRow(BARIS_HEADER_MAPEL).height = 30;
+  ws.getRow(BARIS_HEADER_SUB).height = 18;
+
   HEADER_IDENTITAS.forEach((judul, i) => {
-    const cell = ws.getCell(1, i + 1);
+    // Merge vertikal supaya judul identitas membentang dua baris header.
+    ws.mergeCells(BARIS_HEADER_MAPEL, i + 1, BARIS_HEADER_SUB, i + 1);
+    const cell = ws.getCell(BARIS_HEADER_MAPEL, i + 1);
     cell.value = judul;
     cell.font = { bold: true };
     cell.alignment = RATA_TENGAH;
@@ -70,18 +98,38 @@ export function isiSheetRingkasan(
   });
 
   mapelNama.forEach((nama, i) => {
-    const cell = ws.getCell(1, kolomIdentitas + i + 1);
-    cell.value = nama;
-    cell.font = { bold: true };
+    const awal = kolomMapel(i);
+
+    // Baris 1: nama mapel menutupi tiga kolom.
+    ws.mergeCells(BARIS_HEADER_MAPEL, awal, BARIS_HEADER_MAPEL, awal + kolomPerMapel - 1);
+    const judul = ws.getCell(BARIS_HEADER_MAPEL, awal);
+    judul.value = nama;
+    judul.font = { bold: true };
     // Nama mapel membungkus supaya kolom tidak perlu lebar penuh.
-    cell.alignment = { ...RATA_TENGAH, wrapText: true };
-    cell.fill = TANPA_LATAR;
-    cell.border = GARI;
+    judul.alignment = { ...RATA_TENGAH, wrapText: true };
+    judul.fill = TANPA_LATAR;
+
+    // Baris 2: judul tiap kolom di bawahnya.
+    HEADER_MAPEL.forEach((sub, j) => {
+      const cell = ws.getCell(BARIS_HEADER_SUB, awal + j);
+      cell.value = sub;
+      cell.font = { bold: true };
+      cell.alignment = RATA_TENGAH;
+      cell.fill = TANPA_LATAR;
+    });
+
+    // Border dipasang ke tiap sel, bukan hanya sel utama merge, kalau tidak
+    // sisi dalam kelompok mapel tidak bergaris.
+    for (let r = BARIS_HEADER_MAPEL; r <= BARIS_HEADER_SUB; r++) {
+      for (let c = awal; c < awal + kolomPerMapel; c++) {
+        ws.getCell(r, c).border = GARI;
+      }
+    }
   });
 
-  // --- Data mulai baris 2 ---
+  // --- Data mulai baris 3 ---
   baris.forEach((b, index) => {
-    const n = index + 2;
+    const n = BARIS_DATA_PERTAMA + index;
 
     const no = ws.getCell(n, 1);
     no.value = index + 1;
@@ -113,14 +161,27 @@ export function isiSheetRingkasan(
     kelas.border = GARI;
 
     mapelNama.forEach((m, i) => {
-      const cell = ws.getCell(n, kolomIdentitas + i + 1);
+      const awal = kolomMapel(i);
       const nilai = b.nilai.get(m);
+
+      const selNilai = ws.getCell(n, awal);
+      const selPredikat = ws.getCell(n, awal + 1);
+      const selDeskripsi = ws.getCell(n, awal + 2);
+
+      // Mapel tanpa nilai: ketiga sel kosong, tanpa teks pengganti.
       if (nilai !== undefined) {
-        cell.value = nilai;
-        cell.numFmt = "0";
+        selNilai.value = nilai;
+        selNilai.numFmt = "0";
+        selPredikat.value = predikatDenganKeterangan(predikat(nilai));
+        selDeskripsi.value = deskripsiNilai(nilai);
       }
-      cell.alignment = RATA_TENGAH;
-      cell.border = GARI;
+
+      selNilai.alignment = RATA_TENGAH;
+      selPredikat.alignment = RATA_TENGAH;
+      selDeskripsi.alignment = RATA_TENGAH;
+      selNilai.border = GARI;
+      selPredikat.border = GARI;
+      selDeskripsi.border = GARI;
     });
   });
 
@@ -129,29 +190,37 @@ export function isiSheetRingkasan(
     ws.getColumn(i + 1).width = w;
   });
   mapelNama.forEach((_, i) => {
-    ws.getColumn(kolomIdentitas + i + 1).width = LEBAR_MAPEL;
+    LEBAR_MAPEL.forEach((w, j) => {
+      ws.getColumn(kolomMapel(i) + j).width = w;
+    });
   });
 
   // --- Pengaturan cetak ---
-  // Landscape + hanya lebar yang dipaksakan muat (fitToHeight 0), supaya
-  // 128 baris tidak ikut dipengecilkan dua kali dan jadi tidak terbaca.
-  const barisAkhir = 1 + baris.length;
+  // 53 kolom dipaksakan ke 1 halaman lebar A3 hanya menghasilkan huruf
+  // ~3,4pt saat dicetak (diukur lewat konversi ke PDF), jadi muat 2 halaman
+  // lebar: huruf jadi ~6,8pt dan masih terbaca. Sebagai gantinya, kolom NO dan
+  // NAMA diulang di halaman kanan supaya baris siswa tetap bisa dikenali.
+  // Tinggi bebas (fitToHeight 0) supaya 128 baris tidak dipengecilkan lagi.
+  const barisAkhir = BARIS_DATA_PERTAMA - 1 + baris.length;
   ws.pageSetup = {
-    paperSize: 9,
+    paperSize: KERTAS_A3,
     orientation: "landscape",
     fitToPage: true,
-    fitToWidth: 1,
+    fitToWidth: 2,
     fitToHeight: 0,
     printArea: `A1:${kolomKe(totalKolom)}${barisAkhir}`,
+    // Ulangi dua baris header dan kolom identitas di tiap halaman cetak.
+    printTitlesRow: `${BARIS_HEADER_MAPEL}:${BARIS_HEADER_SUB}`,
+    printTitlesColumn: "A:B",
     horizontalCentered: true,
     margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 },
   };
 
-  // Header tetap terlihat saat menggulir ke bawah.
-  ws.views = [{ state: "frozen", xSplit: 2, ySplit: 1 }];
+  // Nama dan header mapel tetap terlihat saat menggulir ke bawah/ke kanan.
+  ws.views = [{ state: "frozen", xSplit: 2, ySplit: BARIS_HEADER_SUB }];
 }
 
-/** Konversi nomor kolom (1) menjadi huruf: 1 -> A, 21 -> U. */
+/** Konversi nomor kolom (1) menjadi huruf: 1 -> A, 21 -> U, 53 -> BA. */
 function kolomKe(n: number): string {
   let hasil = "";
   let sisa = n;

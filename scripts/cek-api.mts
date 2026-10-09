@@ -493,8 +493,22 @@ console.log("\n=== F4: isi kopraport (label + nilai) ===");
   cek("kelas/semester tidak jadi kapital", v("D2"), "7A/GANJIL");
 }
 
-console.log("\n=== ringkasan nilai: satu sheet, nilai akhir per mapel ===");
+console.log("\n=== ringkasan nilai: satu sheet, nilai + predikat + deskripsi per mapel ===");
 {
+  // Kolom identitas 5; tiap mapel memakai 3 kolom mulai kolom 6.
+  const kolomIdentitas = 5;
+  const kolomPerMapel = 3;
+  const kolomMapel = (i: number) => kolomIdentitas + i * kolomPerMapel + 1;
+  const barisPertama = 3;
+  const barisTerakhir = barisPertama + 127;
+
+  const mapelUrut = [
+    "Akidah Akhlak", "Al-Quran Hadis", "Bahasa Arab", "Bahasa Indonesia",
+    "Bahasa Inggris", "Bahasa Jawa", "Fikih", "Informatika", "IPA", "IPS",
+    "Ke-NU-an", "Matematika", "Pendidikan Pancasila", "PJOK",
+    "Sejarah Kebudayaan Islam", "Seni Budaya",
+  ];
+
   const res = await getRingkasan(req("/api/export/ringkasan"));
   cek("status 200", res.status, 200);
   cek(
@@ -514,69 +528,143 @@ console.log("\n=== ringkasan nilai: satu sheet, nilai akhir per mapel ===");
   await wb.xlsx.load(buf as any);
   const ws = wb.worksheets[0];
   const g = (a: string) => ws.getCell(a).value;
+  const cariBaris = (nama: string) =>
+    Array.from({ length: 128 }, (_, i) => barisPertama + i).find(
+      (r) => ws.getRow(r).getCell(2).value === nama
+    )!;
+  /** [nilai, predikat, deskripsi] untuk satu mapel pada satu baris. */
+  const selMapel = (baris: number, mapel: string) => {
+    const k = kolomMapel(mapelUrut.indexOf(mapel));
+    return [0, 1, 2].map((o) => ws.getCell(baris, k + o).value);
+  };
 
-  // Header baris 1: NO | NAMA | NISN | TTL | KELAS + 16 mapel.
-  cek("jumlah kolom = 21", ws.columnCount, 21);
-  cek("jumlah baris = 129 (1 header + 128 siswa)", ws.rowCount, 129);
+  // Header dua baris: identitas + 16 mapel x 3 kolom = 53 kolom.
+  cek("jumlah kolom = 53 (5 identitas + 16 mapel x 3)", ws.columnCount, 53);
+  cek("jumlah baris = 130 (2 header + 128 siswa)", ws.rowCount, 130);
 
   cek("A1 = NO", g("A1"), "NO");
   cek("B1 = NAMA", g("B1"), "NAMA");
   cek("C1 = NISN", g("C1"), "NISN");
   cek("D1 = TTL", g("D1"), "TTL");
   cek("E1 = KELAS", g("E1"), "KELAS");
+  cek("kolom identitas ter-merge vertikal (baris 2 ikut)", g("A2"), "NO");
+  cek("kolom identitas ter-merge vertikal (baris 2 E)", g("E2"), "KELAS");
 
-  const mapelUrut = [
-    "Akidah Akhlak", "Al-Quran Hadis", "Bahasa Arab", "Bahasa Indonesia",
-    "Bahasa Inggris", "Bahasa Jawa", "Fikih", "Informatika", "IPA", "IPS",
-    "Ke-NU-an", "Matematika", "Pendidikan Pancasila", "PJOK",
-    "Sejarah Kebudayaan Islam", "Seni Budaya",
-  ];
-  cek("16 header mapel sesuai urutan abjad", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map((i) => ws.getCell(1, 5 + i).value), mapelUrut);
+  // Baris 1: nama mapel, tiap nama menutupi tiga kolom.
+  cek(
+    "16 header mapel sesuai urutan abjad",
+    mapelUrut.map((_, i) => ws.getCell(1, kolomMapel(i)).value),
+    mapelUrut
+  );
+  cek("kolom terakhir (BA) = Seni Budaya", ws.getCell(1, 53).value, "Seni Budaya");
+
+  // Baris 2: NILAI | PREDIKAT | DESKRIPSI diulang tiap mapel.
+  const subHeader = Array.from({ length: 53 }, (_, i) => i + 1)
+    .filter((c) => c > kolomIdentitas)
+    .map((c) => ws.getCell(2, c).value);
+  cek(
+    "baris 2 mengulang NILAI | PREDIKAT | DESKRIPSI",
+    subHeader,
+    Array.from({ length: 16 }, () => ["NILAI", "PREDIKAT", "DESKRIPSI"]).flat()
+  );
 
   // Data siswa pertama. Catatan: "ADITYA" urut sebelum "AHMAD" secara abjad,
   // jadi baris pertama bukan AHMAD RIFA`I.
-  cek("A2 = nomor urut 1", g("A2"), 1);
-  cek("B2 = nama siswa pertama (abjad)", g("B2"), "ADITYA AINURROCHMAN");
-  cek("E2 = kelas", g("E2"), "7A");
+  cek("A3 = nomor urut 1", g("A3"), 1);
+  cek("B3 = nama siswa pertama (abjad)", g("B3"), "ADITYA AINURROCHMAN");
+  cek("E3 = kelas", g("E3"), "7A");
 
   // Field kosong harus kosong tanpa teks pengganti.
-  cek("NISN kosong = sel kosong", ws.getCell("C2").value, null);
-  cek("TTL kosong = sel kosong", ws.getCell("D2").value, null);
+  cek("NISN kosong = sel kosong", ws.getCell("C3").value, null);
+  cek("TTL kosong = sel kosong", ws.getCell("D3").value, null);
   cek(
     "tidak ada sel identitas berisi '-' atau 'Kosong'",
-    Array.from({ length: 128 }, (_, i) => ws.getRow(i + 2).getCell(3).value).every(
+    Array.from({ length: 128 }, (_, i) => ws.getRow(barisPertama + i).getCell(3).value).every(
       (v) => v === null || typeof v === "string"
     ),
     true
   );
   cek(
     "kolom TTL kosong di semua 128 baris",
-    Array.from({ length: 128 }, (_, i) => ws.getRow(i + 2).getCell(4).value).every((v) => v === null),
+    Array.from({ length: 128 }, (_, i) => ws.getRow(barisPertama + i).getCell(4).value).every((v) => v === null),
     true
   );
 
   // Cari baris AHMAD RIFA`I untuk memeriksa nilainya (spec 8.2).
-  const barisContoh = Array.from({ length: 128 }, (_, i) => i + 2).find(
-    (r) => ws.getRow(r).getCell(2).value === "AHMAD RIFA`I"
-  )!;
+  const barisContoh = cariBaris("AHMAD RIFA`I");
   cek("baris AHMAD RIFA`I ditemukan", typeof barisContoh, "number");
-  cek("kolom Akidah Akhlak = 56", ws.getCell(barisContoh, 6).value, 56);
-  cek("kolom IPA = 28", ws.getCell(barisContoh, 5 + mapelUrut.indexOf("IPA") + 1).value, 28);
-  cek("kolom Seni Budaya = 40", ws.getCell(barisContoh, 5 + mapelUrut.indexOf("Seni Budaya") + 1).value, 40);
-  cek("nilai berupa angka bulat", typeof ws.getCell(barisContoh, 6).value, "number");
-  cek("nilai format angka", ws.getCell(barisContoh, 6).numFmt, "0");
+  cek("kolom Akidah Akhlak = 56", selMapel(barisContoh, "Akidah Akhlak")[0], 56);
+  cek("kolom IPA = 28", selMapel(barisContoh, "IPA")[0], 28);
+  cek("kolom Seni Budaya = 40", selMapel(barisContoh, "Seni Budaya")[0], 40);
+  cek("nilai berupa angka bulat", typeof ws.getCell(barisContoh, kolomMapel(0)).value, "number");
+  cek("nilai format angka", ws.getCell(barisContoh, kolomMapel(0)).numFmt, "0");
 
-  // Kolom terakhir (U) = Seni Budaya.
-  cek("kolom U = Seni Budaya", ws.getCell(1, 21).value, "Seni Budaya");
+  // Predikat ditulis di samping keterangan: "D (Kurang)".
+  cek("predikat Akidah Akhlak (56) = D (Kurang)", selMapel(barisContoh, "Akidah Akhlak")[1], "D (Kurang)");
+  cek("predikat IPA (28) = D (Kurang)", selMapel(barisContoh, "IPA")[1], "D (Kurang)");
+  cek("predikat Seni Budaya (40) = D (Kurang)", selMapel(barisContoh, "Seni Budaya")[1], "D (Kurang)");
+  cek("deskripsi Akidah Akhlak (56) = Belum Tuntas", selMapel(barisContoh, "Akidah Akhlak")[2], "Belum Tuntas");
+  cek("deskripsi IPA (28) = Belum Tuntas", selMapel(barisContoh, "IPA")[2], "Belum Tuntas");
+
+  // Batas 77: 77 tepat = Tuntas, 76 = Belum Tuntas.
+  const baris77 = cariBaris("MUHAMMAD AKHDAAN ARFA-IQ");
+  cek("nilai 77 (batas) tercatat", selMapel(baris77, "IPS")[0], 77);
+  cek("nilai 77 = C (Cukup)", selMapel(baris77, "IPS")[1], "C (Cukup)");
+  cek("nilai 77 = Tuntas", selMapel(baris77, "IPS")[2], "Tuntas");
+  const baris76 = cariBaris("ANDINI BILQISTH FEBRIYANI");
+  cek("nilai 76 = D (Kurang)", selMapel(baris76, "Bahasa Arab")[1], "D (Kurang)");
+  cek("nilai 76 = Belum Tuntas", selMapel(baris76, "Bahasa Arab")[2], "Belum Tuntas");
+  cek("nilai 85 = B (Baik)", selMapel(baris76, "Fikih")[1], "B (Baik)");
+  cek("nilai 85 = Tuntas", selMapel(baris76, "Fikih")[2], "Tuntas");
+  const barisA = cariBaris("JAUHARA ZAHRANI ADZKIYATUL FIKKRI");
+  cek("nilai 100 = A (Sangat Baik)", selMapel(barisA, "Bahasa Inggris")[1], "A (Sangat Baik)");
+  cek("nilai 100 = Tuntas", selMapel(barisA, "Bahasa Inggris")[2], "Tuntas");
+
+  // Semua 2.048 nilai harus punya predikat + deskripsi yang cocok, dan keempat
+  // predikat muncul karena data seed memang tersebar di A/B/C/D.
+  const semuaPredikat = new Set<string>();
+  const semuaDeskripsi = new Set<string>();
+  let pasanganSalah = 0;
+  let selNilaiSalah = 0;
+  for (let b = barisPertama; b <= barisTerakhir; b++) {
+    for (let i = 0; i < mapelUrut.length; i++) {
+      const k = kolomMapel(i);
+      const nilai = ws.getCell(b, k).value;
+      const pred = ws.getCell(b, k + 1).value;
+      const desk = ws.getCell(b, k + 2).value;
+      if (nilai === null || nilai === undefined) {
+        // Mapel tanpa nilai: ketiganya kosong, tanpa teks pengganti.
+        if (pred !== null || desk !== null) pasanganSalah++;
+        continue;
+      }
+      if (typeof nilai !== "number") {
+        selNilaiSalah++;
+        continue;
+      }
+      if (typeof pred === "string") semuaPredikat.add(pred);
+      if (typeof desk === "string") semuaDeskripsi.add(desk);
+      const p = nilai >= 93 ? "A" : nilai >= 85 ? "B" : nilai >= 77 ? "C" : "D";
+      if (pred !== `${p} (${p === "A" ? "Sangat Baik" : p === "B" ? "Baik" : p === "C" ? "Cukup" : "Kurang"})`) pasanganSalah++;
+      if (desk !== (nilai >= 77 ? "Tuntas" : "Belum Tuntas")) pasanganSalah++;
+    }
+  }
+  cek("semua kolom nilai berisi angka (atau kosong)", selNilaiSalah, 0);
+  cek("tidak ada predikat/deskripsi yang tidak cocok dengan nilainya", pasanganSalah, 0);
+  cek(
+    "keempat predikat muncul dengan keterangannya",
+    [...semuaPredikat].sort(),
+    ["A (Sangat Baik)", "B (Baik)", "C (Cukup)", "D (Kurang)"]
+  );
+  cek("kedua deskripsi ketuntasan muncul", [...semuaDeskripsi].sort(), ["Belum Tuntas", "Tuntas"]);
 
   // Baris terakhir siswa ke-128.
-  cek("A129 = nomor urut 128", g("A129"), 128);
-  cek("B129 = ZOYA LAILA ANDINI", g("B129"), "ZOYA LAILA ANDINI");
-  cek("E129 = kelas 9", g("E129"), "9");
-  cek("tidak ada baris ke-130", ws.getRow(130).getCell(1).value, null);
+  cek(`A${barisTerakhir} = nomor urut 128`, g(`A${barisTerakhir}`), 128);
+  cek(`B${barisTerakhir} = ZOYA LAILA ANDINI`, g(`B${barisTerakhir}`), "ZOYA LAILA ANDINI");
+  cek(`E${barisTerakhir} = kelas 9`, g(`E${barisTerakhir}`), "9");
+  cek(`tidak ada baris ke-${barisTerakhir + 1}`, ws.getRow(barisTerakhir + 1).getCell(1).value, null);
 
   // Urutan kelas lalu nama: kelas berganti monoton dan tidak terbalik.
-  const kelasKolom = Array.from({ length: 128 }, (_, i) => String(ws.getRow(i + 2).getCell(5).value));
+  const kelasKolom = Array.from({ length: 128 }, (_, i) => String(ws.getRow(barisPertama + i).getCell(5).value));
   cek(
     "kelas terurut 7A lalu 7B lalu 8A lalu 8B lalu 9",
     [...new Set(kelasKolom)],
@@ -586,8 +674,8 @@ console.log("\n=== ringkasan nilai: satu sheet, nilai akhir per mapel ===");
     "nama urut abjad di dalam tiap kelas",
     kelasKolom.every((k, i) => {
       if (i === 0 || kelasKolom[i - 1] !== k) return true;
-      const a = String(ws.getRow(i + 2).getCell(2).value);
-      const b = String(ws.getRow(i + 1).getCell(2).value);
+      const a = String(ws.getRow(barisPertama + i).getCell(2).value);
+      const b = String(ws.getRow(barisPertama + i - 1).getCell(2).value);
       return a.localeCompare(b, undefined, { sensitivity: "base" }) > 0;
     }),
     true
@@ -600,34 +688,53 @@ console.log("\n=== ringkasan nilai: satu sheet, nilai akhir per mapel ===");
   await wb2.xlsx.load(Buffer.from(await res2.arrayBuffer()) as any);
   const ws2 = wb2.worksheets[0];
   // Baris AHMAD RIFA'I: Akidah 56 (di luar rentang), IPA 28 -> 30.
-  const barisAhmad = Array.from({ length: 128 }, (_, i) => i + 2).find((r) => ws2.getRow(r).getCell(2).value === "AHMAD RIFA`I")!;
-  const kolIpa = 5 + mapelUrut.indexOf("IPA") + 1;
-  cek("ringkasan memakai nilai AKHIR (IPA 28 -> 30)", ws2.getRow(barisAhmad).getCell(kolIpa).value, 30);
-  cek("nilai di luar rentang tetap (Akidah 56)", ws2.getRow(barisAhmad).getCell(6).value, 56);
+  const barisAhmad = Array.from({ length: 128 }, (_, i) => barisPertama + i).find((r) => ws2.getRow(r).getCell(2).value === "AHMAD RIFA`I")!;
+  cek("ringkasan memakai nilai AKHIR (IPA 28 -> 30)", ws2.getCell(barisAhmad, kolomMapel(mapelUrut.indexOf("IPA"))).value, 30);
+  cek("nilai di luar rentang tetap (Akidah 56)", ws2.getCell(barisAhmad, kolomMapel(0)).value, 56);
+  // Nilai akhir ikut menentukan predikat dan deskripsi.
+  cek("predikat mengikuti nilai akhir (IPA 30 -> D (Kurang))", ws2.getCell(barisAhmad, kolomMapel(mapelUrut.indexOf("IPA")) + 1).value, "D (Kurang)");
+  cek("deskripsi mengikuti nilai akhir (IPA 30 -> Belum Tuntas)", ws2.getCell(barisAhmad, kolomMapel(mapelUrut.indexOf("IPA")) + 2).value, "Belum Tuntas");
   await deleteDongkrak(req("/api/dongkrak"));
 
   // Format header: bold, tanpa background, membungkus.
-  cek("header bold", ws.getCell("F1").font?.bold, true);
+  cek("header bold", ws.getCell(1, kolomMapel(0)).font?.bold, true);
   cek(
     "header tanpa background",
-    (ws.getCell("F1").fill as { pattern?: string })?.pattern === "none",
+    (ws.getCell(1, kolomMapel(0)).fill as { pattern?: string })?.pattern === "none",
     true
   );
-  cek("header mapel wrapText", ws.getCell("F1").alignment?.wrapText, true);
-  cek("tinggi baris header", ws.getRow(1).height, 42);
+  cek("header mapel wrapText", ws.getCell(1, kolomMapel(0)).alignment?.wrapText, true);
+  cek("tinggi baris header mapel", ws.getRow(1).height, 30);
+  cek("tinggi baris header kolom", ws.getRow(2).height, 18);
+  cek("sub-header bold", ws.getCell(2, kolomMapel(0) + 1).font?.bold, true);
 
-  // Lebar kolom.
+  // Border: 셀 yang di-merge pun harus bergaris, termasuk sisi dalam kelompok.
+  cekBenar("sel dalam kelompok mapel diberi garis", [1, 2].every((r) =>
+    [kolomMapel(0), kolomMapel(0) + 1, kolomMapel(0) + 2].every((c) =>
+      Boolean(ws.getCell(r, c).border?.top)
+    )
+  ));
+
+  // Lebar kolom: identitas tetap; tiap mapel 7 (nilai) / 16 (predikat) / 14 (deskripsi).
   cek("lebar kolom identitas", [1, 2, 3, 4, 5].map((i) => ws.getColumn(i).width), [5, 34, 12, 12, 8]);
-  cek("lebar kolom mapel 8", ws.getColumn(6).width, 8);
-  cek("lebar kolom terakhir 8", ws.getColumn(21).width, 8);
+  cek("lebar kolom mapel (nilai, predikat, deskripsi)", [6, 7, 8].map((i) => ws.getColumn(i).width), [7, 16, 14]);
+  cek("lebar kolom terakhir 14", ws.getColumn(53).width, 14);
+  // Kolom predikat harus muat keterangan terpanjang "A (Sangat Baik)".
+  cek("lebar kolom predikat cukup untuk keterangan terpanjang", ws.getColumn(7).width! >= "A (Sangat Baik)".length, true);
+  cek("lebar kolom deskripsi cukup untuk 'Belum Tuntas'", ws.getColumn(8).width! >= "Belum Tuntas".length, true);
 
-  // Pengaturan cetak: landscape, hanya lebar yang dipaksakan.
+  // Pengaturan cetak: A3 landscape, muat 2 halaman lebar, header + kolom
+  // identitas diulang supaya tabel tetap terbaca dan bisa dikenali.
   const ps = ws.pageSetup as any;
+  cek("kertas A3", ps.paperSize, 8);
   cek("orientasi landscape", ps.orientation, "landscape");
-  cek("fitToWidth 1", ps.fitToWidth, 1);
+  cek("fitToWidth 2 (1 halaman menghasilkan huruf ~3,4pt)", ps.fitToWidth, 2);
   cek("fitToHeight 0 (tinggi bebas)", ps.fitToHeight, 0);
-  cek("printArea A1:U129", ps.printArea, "A1:U129");
-  cek("freeze header (ySplit 1)", ws.views?.[0]?.ySplit, 1);
+  cek("printArea A1:BA130", ps.printArea, "A1:BA130");
+  cek("header 1-2 diulang tiap halaman", ps.printTitlesRow, "1:2");
+  cek("kolom NO+NAMA diulang di halaman kanan", ps.printTitlesColumn, "A:B");
+  cek("freeze header (ySplit 2)", ws.views?.[0]?.ySplit, 2);
+  cek("freeze kolom nama (xSplit 2)", ws.views?.[0]?.xSplit, 2);
 }
 
 console.log("\n=== mapel: daftar, tambah, dan dampaknya ===");

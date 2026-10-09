@@ -7,6 +7,7 @@ export function predikat(nilai: number): Predikat {
   return "D";
 }
 
+/** Rentang nilai dalam bentuk teks, dipakai sebagai tooltip badge di UI. */
 export function predikatLabel(p: Predikat): string {
   switch (p) {
     case "A":
@@ -18,6 +19,30 @@ export function predikatLabel(p: Predikat): string {
     case "D":
       return "D (0–76)";
   }
+}
+
+/**
+ * Keterangan kata predikat. Berbeda dengan `predikatLabel` yang menyebut
+ * rentang angka, yang ini menjelaskan artinya — dipakai di Excel ringkasan.
+ */
+export const PREDIKAT_KETERANGAN: Record<Predikat, string> = {
+  A: "Sangat Baik",
+  B: "Baik",
+  C: "Cukup",
+  D: "Kurang",
+};
+
+/** Predikat berikut keterangannya, contoh: "B (Baik)". */
+export function predikatDenganKeterangan(p: Predikat): string {
+  return `${p} (${PREDIKAT_KETERANGAN[p]})`;
+}
+
+/** Batas ketuntasan; sama dengan batas bawah predikat C. */
+export const BATAS_TUNTAS = 77;
+
+/** Keterangan ketuntasan nilai akhir: 77 ke atas tuntas, di bawahnya belum. */
+export function deskripsiNilai(nilai: number): "Tuntas" | "Belum Tuntas" {
+  return nilai >= BATAS_TUNTAS ? "Tuntas" : "Belum Tuntas";
 }
 
 /** Kelas badge predikat, termasuk varian gelap, dipakai seluruh UI. */

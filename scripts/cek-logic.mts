@@ -1,6 +1,6 @@
 // Uji logika murni (tanpa database): predikat, urutan, nama sheet Excel.
 // Jalankan: npm run cek:logic
-import { predikat } from "../lib/predikat.ts";
+import { deskripsiNilai, predikat, predikatDenganKeterangan } from "../lib/predikat.ts";
 import { urutanMapel, urutanSiswa, bisaPindahKelas, URUTAN_KELAS } from "../lib/urutan.ts";
 import { namaSheet, sanitizeFilename } from "../lib/nama-sheet.ts";
 
@@ -27,6 +27,19 @@ cek("predikat(84) = C", predikat(84), "C");
 cek("predikat(77) = C", predikat(77), "C");
 cek("predikat(76) = D", predikat(76), "D");
 cek("predikat(0) = D", predikat(0), "D");
+
+console.log("\n--- keterangan predikat (ditulis di samping hurufnya) ---");
+cek("predikatDenganKeterangan(93) = A (Sangat Baik)", predikatDenganKeterangan(predikat(93)), "A (Sangat Baik)");
+cek("predikatDenganKeterangan(85) = B (Baik)", predikatDenganKeterangan(predikat(85)), "B (Baik)");
+cek("predikatDenganKeterangan(77) = C (Cukup)", predikatDenganKeterangan(predikat(77)), "C (Cukup)");
+cek("predikatDenganKeterangan(56) = D (Kurang)", predikatDenganKeterangan(predikat(56)), "D (Kurang)");
+
+console.log("\n--- deskripsi nilai (batas tuntas 77) ---");
+cek("deskripsiNilai(100) = Tuntas", deskripsiNilai(100), "Tuntas");
+cek("deskripsiNilai(93) = Tuntas", deskripsiNilai(93), "Tuntas");
+cek("deskripsiNilai(77) = Tuntas (tepat batas)", deskripsiNilai(77), "Tuntas");
+cek("deskripsiNilai(76) = Belum Tuntas", deskripsiNilai(76), "Belum Tuntas");
+cek("deskripsiNilai(0) = Belum Tuntas", deskripsiNilai(0), "Belum Tuntas");
 
 console.log("\n--- urutan mapel ---");
 const seedMapel = [
