@@ -10,7 +10,7 @@ import {
   type BatasPredikat,
 } from "../lib/predikat.ts";
 import { validasiBatasPredikat } from "../lib/validasi.ts";
-import { hitungRanking, rataKelas } from "../lib/ranking.ts";
+import { hitungRanking, hitungPeringkatSemua, rataKelas } from "../lib/ranking.ts";
 
 /** Batas bawah sebuah predikat, untuk memeriksa rentang tidak bolong. */
 function rentangBawahPredikat(p: "A" | "B" | "C" | "D", batas: BatasPredikat): number {
@@ -330,6 +330,82 @@ console.log("\n--- ranking: rata-rata, urutan, dan peringkat seri ---");
     true, true, true, true,
   ]);
   cek("per mapel: nilai 0 tetap peringkat terbawah", hitungRanking(nilai(1, "Z", [0]))[0].peringkat, 1);
+}
+
+console.log("\n--- peringkat lengkap: per kelas dan per mapel sekaligus ---");
+{
+  /** Bantu: satu siswa dengan nilai per mapel. */
+  const lengkap = (siswaId: number, nama: string, kelas: string, per: Record<string, number>) =>
+    Object.entries(per).map(([mapel, nilai_akhir]) => ({ siswaId, nama, kelas, mapel, nilai_akhir }));
+
+  // Kelas 7A beranggotakan 3 siswa, kelas 8B beranggotakan 2. Jumlah murid
+  // tiap kelas berbeda, jadi pembagi "dari N" juga harus berbeda.
+  const data = [
+    ...lengkap(1, "ANDI", "7A", { IPA: 90, Matematika: 80, Fikih: 70 }),
+    ...lengkap(2, "BUDI", "7A", { IPA: 80, Matematika: 90, Fikih: 60 }),
+    ...lengkap(3, "CITRA", "7A", { IPA: 70, Matematika: 70, Fikih: 80 }),
+    ...lengkap(4, "DEWI", "8B", { IPA: 60, Matematika: 60, Fikih: 60 }),
+    ...lengkap(5, "EKО", "8B", { IPA: 50, Matematika: 50, Fikih: 50 }),
+  ];
+  // (satu nama sengaja memakai huruf non-ASCII agar urutan abjad tidak peka huruf
+  //  besar/kecil ikut teruji)
+
+  const hasil = hitungPeringkatSemua(data);
+
+  cek("satu baris per siswa", hasil.length, 5);
+
+  // Urutannya "nama lalu kelas", bukan "kelas lalu nama".
+  cek("urut nama lalu kelas", hasil.map((b) => b.nama), ["ANDI", "BUDI", "CITRA", "DEWI", "EKО"]);
+
+  const andi = hasil.find((b) => b.nama === "ANDI")!;
+  const dewi = hasil.find((b) => b.nama === "DEWI")!;
+
+  // Ranking kelas dari rata-rata seluruh mapel, hanya antar siswa se-kelas.
+  // ANDI: (90+80+70)/3 = 80 ; BUDI: (80+90+60)/3 = 76,67 ; CITRA: (70+70+80)/3 = 73,3
+  cek("ranking kelas ANDI = 1", andi.rankingKelas, 1);
+  cek("ranking kelas BUDI = 2", hasil.find((b) => b.nama === "BUDI")!.rankingKelas, 2);
+  cek("ranking kelas CITRA = 3", hasil.find((b) => b.nama === "CITRA")!.rankingKelas, 3);
+  // DEWI kelas 8B jadi peringkat 1 di kelasnya, bukan 4 di sekolah.
+  cek("ranking dihitung per kelas, bukan se-Rap Indonesia", dewi.rankingKelas, 1);
+
+  // Ranking mapel memakai nilai tunggal pada mapel itu.
+  cek("ranking mapel ANDI: IPA 1", andi.rankingMapel.get("IPA"), 1);
+  cek("ranking mapel ANDI: Matematika 2", andi.rankingMapel.get("Matematika"), 2);
+  // Fikih: CITRA 80 > ANDI 70 > BUDI 60, jadi ANDI peringkat 2 di mapel ini.
+  cek("ranking mapel ANDI: Fikih 2", andi.rankingMapel.get("Fikih"), 2);
+  cek("ranking mapel CITRA: Fikih 1", hasil.find((b) => b.nama === "CITRA")!.rankingMapel.get("Fikih"), 1);
+  cek("ranking mapel BUDI: IPA 2", hasil.find((b) => b.nama === "BUDI")!.rankingMapel.get("IPA"), 2);
+  // Di 8B DEWI 60 > 50, jadi peringkat 1 di mapel apa pun.
+  cek("ranking mapel DEWI = 1 di ketiga mapel", [...dewi.rankingMapel.values()], [1, 1, 1]);
+
+  // Seri pada ranking mapel ikut memakai peringkat sama.
+  const seri = hitungPeringkatSemua([
+    ...lengkap(1, "X", "7A", { IPA: 80 }),
+    ...lengkap(2, "Y", "7A", { IPA: 80 }),
+    ...lengkap(3, "Z", "7A", { IPA: 70 }),
+  ]);
+  cek("seri pada ranking mapel: 1, 1, 3", [...seri.map((b) => b.rankingMapel.get("IPA"))], [1, 1, 3]);
+
+  // Mapel tanpa nilai untuk seorang siswa tidak muncul di peta-nya.
+  const sebagian = hitungPeringkatSemua([
+    ...lengkap(1, "ANDI", "7A", { IPA: 90 }),
+    ...lengkap(2, "BUDI", "7A", { IPA: 80 }),
+    ...lengkap(3, "CITRA", "7A", { IPA: 70, Fikih: 90 }),
+  ]);
+  cek(
+    "siswa tanpa nilai pada mapel tidak punya peringkat mapel itu",
+    sebagian.find((b) => b.nama === "ANDI")!.rankingMapel.has("Fikih"),
+    false
+  );
+  cek(
+    "siswa lain tetap punya peringkat di mapel itu",
+    sebagian.find((b) => b.nama === "CITRA")!.rankingMapel.get("Fikih"),
+    1
+  );
+
+  // Kasus batas.
+  cek("data kosong -> hasil kosong", hitungPeringkatSemua([]), []);
+  cek("satu siswa -> ranking kelas 1", hitungPeringkatSemua(lengkap(1, "A", "7A", { IPA: 90 })).map((b) => b.rankingKelas), [1]);
 }
 
 console.log("\n--- rata-rata kelas ---");

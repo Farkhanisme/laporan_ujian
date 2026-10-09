@@ -94,3 +94,92 @@ export function rataKelas(baris: BarisRanking[]): number {
   const total = baris.reduce((jumlah, b) => jumlah + b.rata, 0);
   return satuDesimal(total / baris.length);
 }
+
+/** Baris nilai yang tahu nama mapelnya, untuk peringkat per mapel. */
+export interface BarisNilaiLengkap extends BarisNilai {
+  mapel: string;
+}
+
+export interface BarisPeringkat {
+  nama: string;
+  kelas: string;
+  /** Peringkat dari rata-rata seluruh mapel, dibandingkan antar siswa se-Kelas. */
+  rankingKelas: number;
+  /** Peringkat pada tiap mapel; mapel tanpa nilai untuk siswa ini tidak ada. */
+  rankingMapel: Map<string, number>;
+}
+
+/**
+ * Peringkat kelas dan peringkat per mapel untuk seluruh siswa.
+ *
+ * Tidak ada algoritma peringkat baru di sini: `hitungRanking` yang sama
+ * dipakai halaman Ranking dan ekspor Excel juga dipakai dua kali, hanya
+ * dengan pengelompokan berbeda —
+ *   - dikelompokkan per kelas       -> peringkat dari rata-rata
+ *   - dikelompokkan per kelas+mapel -> peringkat dari nilai tunggal
+ *
+ * "Dari N" diambil dari jumlah siswa unik di kelas tersebut, dihitung sekali
+ * per kelas. Bukan jumlah seluruh siswa, dan bukan jumlah mapel.
+ */
+export function hitungPeringkatSemua(rows: BarisNilaiLengkap[]): BarisPeringkat[] {
+  // Pengelompokan per (kelas, mapel), sekaligus peta siswaId -> mapel supaya
+  // pencocokan nanti O(1), bukan memindai ulang daftar tiap baris.
+  const perKelasMapel = new Map<string, BarisNilai[]>();
+  const mapelSiswa = new Map<string, Map<number, string>>();
+  for (const r of rows) {
+    const kunci = `${r.kelas}\u0000${r.mapel}`;
+    let list = perKelasMapel.get(kunci);
+    if (!list) {
+      list = [];
+      perKelasMapel.set(kunci, list);
+      mapelSiswa.set(kunci, new Map());
+    }
+    list.push(r);
+    mapelSiswa.get(kunci)!.set(r.siswaId, r.mapel);
+  }
+
+  const rankingMapel = new Map<number, Map<string, number>>();
+  for (const [kunci, list] of perKelasMapel) {
+    const petaMapel = mapelSiswa.get(kunci)!;
+    for (const b of hitungRanking(list)) {
+      let perMapel = rankingMapel.get(b.siswaId);
+      if (!perMapel) {
+        perMapel = new Map();
+        rankingMapel.set(b.siswaId, perMapel);
+      }
+      perMapel.set(petaMapel.get(b.siswaId)!, b.peringkat);
+    }
+  }
+
+  // Pengelompokan per kelas untuk peringkat dari rata-rata.
+  const perKelas = new Map<string, BarisNilai[]>();
+  for (const r of rows) {
+    let list = perKelas.get(r.kelas);
+    if (!list) {
+      list = [];
+      perKelas.set(r.kelas, list);
+    }
+    list.push(r);
+  }
+
+  const hasil: BarisPeringkat[] = [];
+  for (const list of perKelas.values()) {
+    for (const b of hitungRanking(list)) {
+      hasil.push({
+        nama: b.nama,
+        kelas: b.kelas,
+        rankingKelas: b.peringkat,
+        rankingMapel: rankingMapel.get(b.siswaId) ?? new Map(),
+      });
+    }
+  }
+
+  // Urutan "nama lalu kelas", berlawanan dengan urutanSiswa yang dipakai
+  // halaman lain (kelas lalu nama). Sengaja dipisah supaya halaman Ranking dan
+  // file Ringkasan tidak ikut berubah.
+  return hasil.sort(
+    (a, b) =>
+      a.nama.localeCompare(b.nama, undefined, { sensitivity: "base" }) ||
+      a.kelas.localeCompare(b.kelas, undefined, { sensitivity: "base" })
+  );
+}

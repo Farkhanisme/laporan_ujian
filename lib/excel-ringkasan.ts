@@ -5,6 +5,7 @@ import {
   predikatDenganKeterangan,
   type BatasPredikat,
 } from "./predikat";
+import { KERTAS_A3, kolomKe } from "./excel-kertas";
 
 export interface RingkasanSiswa {
   id: number;
@@ -32,12 +33,6 @@ export const LEBAR_MAPEL = [7, 16, 14];
 const BARIS_HEADER_MAPEL = 1;
 const BARIS_HEADER_SUB = 2;
 const BARIS_DATA_PERTAMA = 3;
-
-/**
- * A3 tidak ada di enum `PaperSize` ExcelJS (yang isinya A4 = 9), tapi angka 8
- * tetap ditulis apa adanya ke XML dan dibaca Excel sebagai A3.
- */
-const KERTAS_A3 = 8 as ExcelJS.PaperSize;
 
 const RATA_TENGAH = {
   horizontal: "center" as const,
@@ -226,18 +221,6 @@ export function isiSheetRingkasan(
 
   // Nama dan header mapel tetap terlihat saat menggulir ke bawah/ke kanan.
   ws.views = [{ state: "frozen", xSplit: 2, ySplit: BARIS_HEADER_SUB }];
-}
-
-/** Konversi nomor kolom (1) menjadi huruf: 1 -> A, 21 -> U, 53 -> BA. */
-function kolomKe(n: number): string {
-  let hasil = "";
-  let sisa = n;
-  while (sisa > 0) {
-    const modulo = (sisa - 1) % 26;
-    hasil = String.fromCharCode(65 + modulo) + hasil;
-    sisa = Math.floor((sisa - modulo) / 26);
-  }
-  return hasil;
 }
 
 export async function generateRingkasan(

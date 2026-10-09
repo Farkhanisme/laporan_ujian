@@ -2,6 +2,7 @@ import ExcelJS from "exceljs";
 import type { BarisRanking } from "./ranking";
 import { predikat, type BatasPredikat } from "./predikat";
 import { namaSheet } from "./nama-sheet";
+import { kolomKe } from "./excel-kertas";
 
 /** Judul kolom saat ranking berdasarkan seluruh mapel (rata-rata). */
 export const HEADER_RANKING = [
@@ -209,18 +210,6 @@ function aturCetak(ws: ExcelJS.Worksheet, jumlahKolom: number, jumlahBaris: numb
     horizontalCentered: true,
     margins: { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 },
   };
-}
-
-/** Konversi nomor kolom (1) menjadi huruf: 1 -> A, 6 -> F. */
-function kolomKe(n: number): string {
-  let hasil = "";
-  let sisa = n;
-  while (sisa > 0) {
-    const modulo = (sisa - 1) % 26;
-    hasil = String.fromCharCode(65 + modulo) + hasil;
-    sisa = Math.floor((sisa - modulo) / 26);
-  }
-  return hasil;
 }
 
 /** Ranking satu kelas dari seluruh mapel: satu sheet. */

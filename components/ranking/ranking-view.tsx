@@ -36,6 +36,7 @@ import {
   Trophy,
   TrendingDown,
   TrendingUp,
+  Users,
 } from "lucide-react";
 
 /** Nilai khusus: tampil seluruh mapel, dasar ranking adalah rata-rata. */
@@ -74,6 +75,7 @@ export function RankingView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [downloadingSemua, setDownloadingSemua] = useState(false);
 
   // Daftar mapel diambil dari database supaya mapel baru ikut muncul.
   useEffect(() => {
@@ -206,6 +208,29 @@ export function RankingView({
     }
   }
 
+  /** Berkas peringkat seluruh siswa: satu sheet, semua kelas dan semua mapel. */
+  async function unduhSemua() {
+    setDownloadingSemua(true);
+    try {
+      const res = await fetch("/api/export/peringkat");
+      if (!res.ok) throw new Error("Gagal membuat daftar peringkat.");
+
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "peringkat_semua_siswa_ASTS_GANJIL_2026-2027.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      toast.success("Peringkat semua siswa berhasil diunduh.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Gagal mengunduh peringkat.");
+    } finally {
+      setDownloadingSemua(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -239,6 +264,21 @@ export function RankingView({
             <Download className="size-4" />
           )}
           Unduh Ranking
+        </Button>
+
+        {/* Terpisah karena cakupannya berbeda: berkas ini satu kelas saja,
+            sedangkan berkas di sebelahnya seluruh kelas dan seluruh mapel. */}
+        <Button
+          variant="outline"
+          onClick={unduhSemua}
+          disabled={downloadingSemua || loading}
+        >
+          {downloadingSemua ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Users className="size-4" />
+          )}
+          Unduh Peringkat Semua
         </Button>
       </div>
 

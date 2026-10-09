@@ -7,6 +7,18 @@ import path from "node:path";
 import ExcelJS from "exceljs";
 import type { BatasPredikat } from "../lib/predikat";
 
+/** Konversi nomor kolom ke huruf, untuk menyusun printArea di pemeriksaan. */
+function kolomKe(n: number): string {
+  let hasil = "";
+  let sisa = n;
+  while (sisa > 0) {
+    const modulo = (sisa - 1) % 26;
+    hasil = String.fromCharCode(65 + modulo) + hasil;
+    sisa = Math.floor((sisa - modulo) / 26);
+  }
+  return hasil;
+}
+
 const dbUji = path.join(process.cwd(), "scripts/cek-api.sqlite");
 process.env.TURSO_DATABASE_URL = `file:${dbUji}`;
 
@@ -28,6 +40,7 @@ const { GET: getMapel, POST: postMapel } = await import("../app/api/mapel/route"
 const { GET: getRingkasan } = await import("../app/api/export/ringkasan/route");
 const { GET: getRanking } = await import("../app/api/ranking/route");
 const { GET: getExportRanking } = await import("../app/api/export/ranking/route");
+const { GET: getExportPeringkat } = await import("../app/api/export/peringkat/route");
 const { GET: getPredikat, PUT: putPredikat, DELETE: deletePredikat } = await import(
   "../app/api/predikat/route"
 );
@@ -1256,6 +1269,274 @@ console.log("\n=== ranking: peringkat per kelas dari nilai akhir ===");
     cek("mode rata-rata tetap 1 sheet", wbRata.worksheets.length, 1);
     cek("mode rata-rata tetap RATA-RATA", wbRata.worksheets[0].getCell("D1").value, "RATA-RATA");
   }
+}
+
+console.log("\n=== ekspor peringkat: semua siswa, kolom per mapel ===");
+{
+  // Jumlah siswa per kelas dibaca dari database, bukan ditulis di kode.
+  const jumlahPerKelas = async () => {
+    const res = await db.execute({ sql: "SELECT kelas, COUNT(*) AS c FROM siswa GROUP BY kelas", args: [] });
+    const m = new Map<string, number>();
+    for (const r of res.rows as unknown as Array<{ kelas: string; c: number }>) {
+      m.set(r.kelas, Number(r.c));
+    }
+    return m;
+  };
+
+  const jumlahSiswa = await jumlahPerKelas();
+  const totalSiswa = [...jumlahSiswa.values()].reduce((a, b) => a + b, 0);
+  cek("total siswa = 128", totalSiswa, 128);
+
+  const jumlahMapel = (
+    await db.execute({ sql: "SELECT COUNT(DISTINCT nama) AS c FROM mapel", args: [] })
+  ).rows[0] as unknown as { c: number };
+  const totalMapel = Number(jumlahMapel.c);
+
+  const res = await getExportPeringkat(req("/api/export/peringkat"));
+  cek("GET /api/export/peringkat ok", res.status, 200);
+  cek(
+    "tipe konten xlsx",
+    res.headers.get("content-type"),
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  cekBenar(
+    "nama berkas benar",
+    (res.headers.get("content-disposition") ?? "").includes("peringkat_semua_siswa_ASTS_GANJIL_2026-2027.xlsx")
+  );
+
+  const buf = Buffer.from(await res.arrayBuffer());
+  cek("menghasilkan .xlsx (PK zip)", buf.subarray(0, 2).toString(), "PK");
+
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf as any);
+  const ws = wb.worksheets[0];
+  const g = (a: string) => ws.getCell(a).value;
+  const kolomAwal = 4;
+  // Kolom RANKING berada SETELAH kolom mapel: 3 identitas + 16 mapel + 1.
+  const kolomAkhir = kolomAwal + totalMapel;
+  const barisAkhir = 1 + totalSiswa;
+
+  cek("satu sheet", wb.worksheets.length, 1);
+  cek("nama sheet", ws.name, "Peringkat");
+  // 3 identitas + satu kolom per mapel + satu kolom ranking akhir.
+  cek(`jumlah kolom = ${kolomAkhir} (3 + ${totalMapel} mapel + 1)`, ws.columnCount, kolomAkhir);
+  cek(`jumlah baris = ${barisAkhir} (1 header + ${totalSiswa} siswa)`, ws.rowCount, barisAkhir);
+
+  // Header: NO | NAMA | KELAS | <mapel> | RANKING
+  cek("A1 = NO", g("A1"), "NO");
+  cek("B1 = NAMA", g("B1"), "NAMA");
+  cek("C1 = KELAS", g("C1"), "KELAS");
+
+  const mapelUrut = (
+    await db.execute({ sql: "SELECT DISTINCT nama FROM mapel", args: [] })
+  ).rows as unknown as Array<{ nama: string }>;
+  const namaMapelUrut = mapelUrut
+    .map((r) => r.nama)
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  cek(
+    "header kolom mapel sesuai urutan abjad",
+    Array.from({ length: totalMapel }, (_, i) => g(ws.getCell(1, kolomAwal + i).address)),
+    namaMapelUrut
+  );
+  cek("kolom terakhir = RANKING", ws.getCell(1, kolomAkhir).value, "RANKING");
+
+  // Cek satu mapel saja, dibatasi kelas 7A supaya mudah diperiksa manual.
+  const mapelCek = namaMapelUrut[0];
+  const kolomCek = kolomAwal + namaMapelUrut.indexOf(mapelCek);
+
+  // Nama dan kelas per baris, dibaca sekali lalu dipakai di beberapa pemeriksaan.
+  const namaAktif = Array.from({ length: totalSiswa }, (_, i) => ws.getCell(i + 2, 2).value as string);
+  const kelasAktif = Array.from({ length: totalSiswa }, (_, i) => ws.getCell(i + 2, 3).value as string);
+
+  // --- Peringkat dihitung ulang dengan SQL yang terpisah, bukan memakai
+  // hitungPeringkatSemua, supaya kesalahan yang sama tidak muncul di dua sisi.
+  const sqlSemua = await db.execute({
+    sql: `SELECT s.nama AS nama, s.kelas AS kelas, m.nama AS mapel,
+                 COALESCE(n.nilai_dongkrak, n.nilai_asli) AS nilai
+          FROM nilai n JOIN siswa s ON s.id = n.siswa_id JOIN mapel m ON m.id = n.mapel_id`,
+    args: [],
+  });
+  const barisSql = sqlSemua.rows as unknown as Array<{
+    nama: string; kelas: string; mapel: string; nilai: number;
+  }>;
+
+  /** Peringkat competition: 1 + jumlah nilai yang lebih besar. */
+  const peringkatCompetition = (nilai: number, semuaNilai: number[]) =>
+    semuaNilai.filter((x) => x > nilai).length + 1;
+
+  {
+    // Kunci memakai kelas + nama, karena skema mengizinkan nama sama di kelas
+    // berbeda (UNIQUE(nama, kelas)).
+    const Expected = new Map<string, string>();
+    for (const kelas of jumlahSiswa.keys()) {
+      const perSiswa = barisSql
+        .filter((r) => r.kelas === kelas && r.mapel === mapelCek)
+        .map((r) => ({ nama: r.nama, nilai: Number(r.nilai) }));
+      const semuaNilai = perSiswa.map((r) => r.nilai);
+      for (const r of perSiswa) {
+        Expected.set(
+          `${kelas}|${r.nama}`,
+          `${peringkatCompetition(r.nilai, semuaNilai)} dari ${jumlahSiswa.get(kelas)}`
+        );
+      }
+    }
+
+    const aktual = Array.from({ length: totalSiswa }, (_, i) => ws.getCell(i + 2, kolomCek).value);
+
+    cek(`kolom ${mapelCek} tidak ada sel kosong`, aktual.every((v) => v !== null), true);
+    cek(
+      `isi kolom ${mapelCek} = "peringkat dari jumlah murid kelas"`,
+      aktual.every((v) => typeof v === "string" && /^\d+ dari \d+$/.test(v as string)),
+      true
+    );
+    const salah = aktual
+      .map((v, i) => [v, Expected.get(`${kelasAktif[i]}|${namaAktif[i]}`)] as const)
+      .filter(([v, e]) => v !== e);
+    cek(`isi kolom ${mapelCek} persis sama dengan hitungan SQL`, salah.length, 0);
+    // Kalau ada sel yang beda, tampilkan beberapa contoh supaya failure-nya
+    // bisa ditindaklanjuti tanpa harus mencetak ulang seluruh sheet.
+    if (salah.length > 0) {
+      // Kalau ada sel yang beda, tampilkan beberapa contoh supaya failure-nya
+      // bisa ditindaklanjuti tanpa mencetak ulang seluruh sheet.
+      cek(
+        "contoh sel yang berbeda",
+        salah.slice(0, 3).map(([a, e]) => `${a} vs ${e}`),
+        []
+      );
+    }
+  }
+
+  // Kolom ranking akhir: dari rata-rata seluruh mapel, per kelas.
+  {
+    const aktual = Array.from({ length: totalSiswa }, (_, i) => ws.getCell(i + 2, kolomAkhir).value);
+    cek("kolom RANKING terisi semua baris", aktual.every((v) => typeof v === "string"), true);
+    cek(
+      "kolom RANKING format 'N dari M'",
+      aktual.every((v) => /^(\d+) dari \d+$/.test(v as string)),
+      true
+    );
+    // Kolom ranking akhir juga dibandingkan dengan SQL yang menghitung ulang
+    // sendiri: 1 + jumlah siswa se-Kelas yang rata-ratanya lebih tinggi.
+    const ExpectedKelas = new Map<string, string>();
+    for (const kelas of jumlahSiswa.keys()) {
+      // Total DAN jumlah mapel per siswa. Pembagi HARUS jumlah mapel siswa itu,
+      // bukan jumlah siswa di kelas — memakai yang salah membuat seluruh
+      // ranking kelas bergeser.
+      const total = new Map<string, { sum: number; n: number }>();
+      for (const r of barisSql) {
+        if (r.kelas !== kelas) continue;
+        const e = total.get(r.nama) ?? { sum: 0, n: 0 };
+        e.sum += Number(r.nilai);
+        e.n += 1;
+        total.set(r.nama, e);
+      }
+      // Semua siswa satu kelas punya jumlah mapel sama, jadi jumlah nilai
+      // setara dengan rata-rata untuk keperluan perbandingan peringkat.
+      //
+      // WAJIB dibulatkan ke satu desimal sebelum dibandingkan: hitungRanking
+      // membulatkan lebih dulu lalu memberi peringkat, jadi bila acuan memakai
+      // rata-rata mentah, dua siswa yang tampil sama bisa terbeda peringkat.
+      const satuDesimal = (n: number) => Math.round(n * 10) / 10;
+      const rata = [...total.entries()].map(
+        ([nama, e]) => [nama, satuDesimal(e.sum / e.n)] as const
+      );
+      for (const [nama, nilai] of rata) {
+        ExpectedKelas.set(
+          `${kelas}|${nama}`,
+          `${rata.filter(([, x]) => x > nilai).length + 1} dari ${jumlahSiswa.get(kelas)}`
+        );
+      }
+    }
+
+    const salahKelas = aktual
+      .map((v, i) => [v, ExpectedKelas.get(`${kelasAktif[i]}|${namaAktif[i]}`)] as const)
+      .filter(([v, e]) => v !== e);
+    cek("isi kolom RANKING sama dengan hitungan SQL", salahKelas.length, 0);
+    if (salahKelas.length > 0) {
+      cek(
+        "contoh sel RANKING yang berbeda",
+        salahKelas.slice(0, 3).map(([a, e]) => `${a} vs ${e}`),
+        []
+      );
+    }
+
+    // Pembagi harus jumlah murid kelas masing-masing, bukan 128 dan bukan
+    // jumlah mapel.
+    cek(
+      "pembagi = jumlah murid kelas masing-masing",
+      aktual.every((v, i) => {
+        const m = /^(\d+) dari (\d+)$/.exec(v as string);
+        return m !== null && Number(m[2]) === jumlahSiswa.get(kelasAktif[i]);
+      }),
+      true
+    );
+    // Ranking dari rata-rata harus dimulai dari 1 di tiap kelas.
+    const perKelas = new Map<string, number[]>();
+    aktual.forEach((v, i) => {
+      const list = perKelas.get(kelasAktif[i]) ?? [];
+      list.push(Number(/^(\d+) dari/.exec(v as string)![1]));
+      perKelas.set(kelasAktif[i], list);
+    });
+    cek(
+      "tiap kelas punya peringkat mulai dari 1",
+      [...perKelas.values()].every((list) => list.includes(1)),
+      true
+    );
+    cek(
+      "tiap kelas punya tepat satu peringkat 1 (atau lebih bila seri)",
+      [...perKelas.values()].every((list) => list.filter((p) => p === 1).length === 1),
+      true
+    );
+  }
+
+  // Urutan baris: nama lalu kelas, bukan kelas lalu nama.
+  {
+    const urut = Array.from({ length: totalSiswa }, (_, i) => ({
+      nama: ws.getCell(i + 2, 2).value as string,
+      kelas: ws.getCell(i + 2, 3).value as string,
+    }));
+    const sorted = [...urut].sort(
+      (a, b) =>
+        a.nama.localeCompare(b.nama, undefined, { sensitivity: "base" }) ||
+        a.kelas.localeCompare(b.kelas, undefined, { sensitivity: "base" })
+    );
+    cek("urut baris nama lalu kelas", urut.map((u) => u.nama), sorted.map((s) => s.nama));
+    // Berbeda dari halaman Ranking/ringkasan yang memakai kelas lalu nama:
+    // urutan di sini tidak boleh ikut-tergantung pola itu.
+    const urutKelasDulu = [...urut].sort(
+      (a, b) =>
+        a.kelas.localeCompare(b.kelas) || a.nama.localeCompare(b.nama)
+    );
+    cek(
+      "urut ini benar-benar tidak sama dengan kelas-lalu-nama (bukan kebetulan)",
+      urut.map((u) => u.nama).join("|") !== urutKelasDulu.map((u) => u.nama).join("|"),
+      true
+    );
+  }
+
+  // NO berurutan 1..128.
+  cek(
+    "NO berurutan",
+    Array.from({ length: totalSiswa }, (_, i) => ws.getCell(i + 2, 1).value),
+    Array.from({ length: totalSiswa }, (_, i) => i + 1)
+  );
+
+  // Lebar kolom + pengaturan cetak.
+  cek("lebar kolom identitas", [1, 2, 3].map((i) => ws.getColumn(i).width), [5, 32, 8]);
+  // Lebar kolom mapel harus muat "12 dari 100" dan nama mapel yang tidak bisa
+  // dipisah kata ("Informatika"), supaya tidak ada judul terpotong di tengah kata.
+  const LEBAR_MAPEL_MIN = 13;
+  cek("lebar kolom mapel >= 13", ws.getColumn(kolomAwal).width! >= LEBAR_MAPEL_MIN, true);
+  cek("lebar kolom mapel cukup untuk 'Informatika'", ws.getColumn(kolomAwal).width! >= "Informatika".length, true);
+  cek("lebar kolom mapel cukup untuk '12 dari 100'", ws.getColumn(kolomAwal).width! >= "12 dari 100".length, true);
+  cek("lebar kolom RANKING 12", ws.getColumn(kolomAkhir).width, 12);
+  const ps = ws.pageSetup as any;
+  cek("kertas A3", ps.paperSize, 8);
+  cek("orientasi landscape", ps.orientation, "landscape");
+  cek("fitToWidth 1", ps.fitToWidth, 1);
+  cek("fitToHeight 0 (tinggi bebas)", ps.fitToHeight, 0);
+  cek(`printArea A1:${kolomKe(kolomAkhir)}${barisAkhir}`, ps.printArea, `A1:${kolomKe(kolomAkhir)}${barisAkhir}`);
+  cek("header diulang tiap halaman", ps.printTitlesRow, "1:1");
 }
 
 console.log("\n=== pengaturan predikat: batas bawah, batas tuntas, dan dampaknya ===");
