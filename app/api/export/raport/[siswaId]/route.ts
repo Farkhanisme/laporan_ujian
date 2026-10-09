@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { predikat } from "@/lib/predikat";
+import { ambilBatasPredikat } from "@/lib/predikat-db";
 import { urutanMapel } from "@/lib/urutan";
 import { generateRaportSiswa, type SiswaData, type NilaiRow } from "@/lib/excel";
 import { sanitizeFilename } from "@/lib/nama-sheet";
@@ -36,6 +37,8 @@ export async function GET(
       args: [id],
     });
 
+    const batas = await ambilBatasPredikat();
+
     const nilaiRows: NilaiRow[] = (nilaiRes.rows as unknown as Array<{
       mapel: string;
       nilai_asli: number;
@@ -43,7 +46,7 @@ export async function GET(
     }>)
       .map((r) => {
         const nilai_akhir = r.nilai_dongkrak ?? r.nilai_asli;
-        return { ...r, nilai_akhir, predikat: predikat(nilai_akhir) };
+        return { ...r, nilai_akhir, predikat: predikat(nilai_akhir, batas) };
       })
       .sort((a, b) => urutanMapel(a.mapel, b.mapel));
 

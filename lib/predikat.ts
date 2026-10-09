@@ -1,23 +1,80 @@
 export type Predikat = "A" | "B" | "C" | "D";
 
-export function predikat(nilai: number): Predikat {
-  if (nilai >= 93) return "A";
-  if (nilai >= 85) return "B";
-  if (nilai >= 77) return "C";
+/**
+ * Batas bawah tiap predikat, bisa diubah pengguna lewat halaman
+ * Pengaturan Predikat.
+ *
+ * Hanya batas bawah yang disimpan. Batas atas tiap predikat diturunkan dari
+ * predikat di atasnya, jadi mustahil ada celah atau tumpang tindih antar rentang:
+ * A >= minA selalu jadi minA..100, B jadi minB..minA-1, dan seterusnya.
+ *
+ * `minD` tidak disimpan karena selalu 0 — semua nilai 0..100 wajib punya
+ * predikat, tidak boleh ada nilai yang jatuh ke luar seluruh rentang.
+ */
+export interface BatasPredikat {
+  minA: number;
+  minB: number;
+  minC: number;
+  /** Nilai akhir mulai angka ini disebut tuntas. */
+  batasTuntas: number;
+}
+
+/**
+ * Batas bawaan dipakai kalau tabel `batas_predikat` belum ada, mis. migrasi
+ * belum dijalankan. Nilai ini sama dengan ketentuan awal aplikasi.
+ */
+export const BATAS_AWAL: BatasPredikat = {
+  minA: 93,
+  minB: 85,
+  minC: 77,
+  batasTuntas: 77,
+};
+
+/** Batas atas tiap predikat, dihitung dari batas bawah di atasnya. */
+export function batasAtas(p: Predikat, batas: BatasPredikat): number {
+  switch (p) {
+    case "A":
+      return 100;
+    case "B":
+      return batas.minA - 1;
+    case "C":
+      return batas.minB - 1;
+    case "D":
+      return batas.minC - 1;
+  }
+}
+
+/**
+ * Predikat dari nilai akhir.
+ *
+ * `batas` sengaja WAJIB (tanpa nilai bawaan): kalau dipanggil tanpa batas,
+ * TypeScript akan gagal saat build. Nilai bawaan di sini justru berbahaya,
+ * karena tempat yang lupa mengoper batasnya akan diam-diam memakai angka lama
+ * dan menghasilkan raport yang salah tanpa ada yang gagal.
+ */
+export function predikat(nilai: number, batas: BatasPredikat): Predikat {
+  if (nilai >= batas.minA) return "A";
+  if (nilai >= batas.minB) return "B";
+  if (nilai >= batas.minC) return "C";
   return "D";
 }
 
 /** Rentang nilai dalam bentuk teks, dipakai sebagai tooltip badge di UI. */
-export function predikatLabel(p: Predikat): string {
+export function predikatLabel(p: Predikat, batas: BatasPredikat): string {
+  return `${p} (${rentangBawah(p, batas)}–${batasAtas(p, batas)})`;
+}
+
+/** Rentang bawah sebuah predikat (0 untuk D). */
+function rentangBawah(p: Predikat, batas: BatasPredikat): number {
   switch (p) {
     case "A":
-      return "A (93–100)";
+      return batas.minA;
     case "B":
-      return "B (85–92)";
+      return batas.minB;
     case "C":
-      return "C (77–84)";
+      return batas.minC;
     case "D":
-      return "D (0–76)";
+      return 0;
   }
 }
 
@@ -37,12 +94,11 @@ export function predikatDenganKeterangan(p: Predikat): string {
   return `${p} (${PREDIKAT_KETERANGAN[p]})`;
 }
 
-/** Batas ketuntasan; sama dengan batas bawah predikat C. */
-export const BATAS_TUNTAS = 77;
-
-/** Keterangan ketuntasan nilai akhir: 77 ke atas tuntas, di bawahnya belum. */
-export function deskripsiNilai(nilai: number): "Tuntas" | "Belum Tuntas" {
-  return nilai >= BATAS_TUNTAS ? "Tuntas" : "Belum Tuntas";
+/**
+ * Keterangan ketuntasan nilai akhir, memakai batas tuntas yang sedang berlaku.
+ */
+export function deskripsiNilai(nilai: number, batas: BatasPredikat): "Tuntas" | "Belum Tuntas" {
+  return nilai >= batas.batasTuntas ? "Tuntas" : "Belum Tuntas";
 }
 
 /** Kelas badge predikat, termasuk varian gelap, dipakai seluruh UI. */

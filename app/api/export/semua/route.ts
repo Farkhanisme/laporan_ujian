@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { predikat } from "@/lib/predikat";
+import { ambilBatasPredikat } from "@/lib/predikat-db";
 import { urutanMapel, urutanSiswa } from "@/lib/urutan";
 import { generateSemuaNilai, type SiswaData, type NilaiRow } from "@/lib/excel";
 
@@ -32,6 +33,10 @@ export async function GET() {
 
     const rows = res.rows as unknown as JoinedRow[];
 
+    // Batas predikat dibaca SATU KALI di sini, bukan per siswa: berkas ini
+    // berisi 128 sheet dan satu query per sheet akan lambat.
+    const batas = await ambilBatasPredikat();
+
     const grouped = new Map<number, { siswa: SiswaData; nilai: NilaiRow[] }>();
 
     for (const r of rows) {
@@ -49,7 +54,7 @@ export async function GET() {
       entry.nilai.push({
         mapel: r.mapel,
         nilai_akhir,
-        predikat: predikat(nilai_akhir),
+        predikat: predikat(nilai_akhir, batas),
       });
     }
 

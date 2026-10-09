@@ -29,6 +29,7 @@ import { TableSkeleton } from "@/components/skeleton";
 import { IsiCepat } from "@/components/nilai/isi-cepat";
 import { nilaiValid, type NilaiRow } from "@/components/nilai/nilai-tipe";
 import { urutanMapel } from "@/lib/urutan";
+import { BATAS_AWAL, type BatasPredikat } from "@/lib/predikat";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -60,6 +61,7 @@ export function NilaiView({ mapelAwal }: { mapelAwal?: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Record<number, string>>({});
+  const [batas, setBatas] = useState<BatasPredikat>(BATAS_AWAL);
   const [saving, setSaving] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [downloadingRingkasan, setDownloadingRingkasan] = useState(false);
@@ -135,6 +137,9 @@ export function NilaiView({ mapelAwal }: { mapelAwal?: string }) {
 
         if (!json.ok) throw new Error(json.error);
         setRows(json.data);
+        // Batas predikat ikut terkirim dari server supaya badge memakai batas
+        // yang sama, bukan batas bawaan yang bisa sudah usang.
+        if (json.batas) setBatas(json.batas);
         setError(null);
       } catch (err) {
         if (batal) return;
@@ -158,6 +163,7 @@ export function NilaiView({ mapelAwal }: { mapelAwal?: string }) {
       const json = await res.json();
       if (!json.ok) throw new Error(json.error);
       setRows(json.data);
+      if (json.batas) setBatas(json.batas);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memuat nilai.");
@@ -705,7 +711,7 @@ export function NilaiView({ mapelAwal }: { mapelAwal?: string }) {
 
                     <TableCell className="text-center">
                       <span className="tabular mr-2 font-medium">{row.nilai_akhir}</span>
-                      <PredikatBadge nilai={row.nilai_akhir} />
+                      <PredikatBadge nilai={row.nilai_akhir} batas={batas} />
                     </TableCell>
 
                     {!modeSiswaTunggal ? (

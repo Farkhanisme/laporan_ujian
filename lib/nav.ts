@@ -1,6 +1,7 @@
 import {
   BookOpenText,
   ClipboardList,
+  SlidersHorizontal,
   TrendingUp,
   Trophy,
   Users,
@@ -45,6 +46,12 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Mapel",
     description: "Mata pelajaran",
     icon: BookOpenText,
+  },
+  {
+    href: "/predikat",
+    label: "Predikat",
+    description: "Batas predikat dan batas tuntas",
+    icon: SlidersHorizontal,
   },
 ];
 

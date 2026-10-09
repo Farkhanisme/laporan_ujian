@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { ambilBatasPredikat } from "@/lib/predikat-db";
 
 /** Satu nilai akhir siswa pada satu mapel, sesuai bentuk `lib/ranking.ts`. */
 export interface RankingApiRow {
@@ -68,7 +69,7 @@ export async function GET(request: NextRequest) {
         nilai_akhir: r.nilai_dongkrak ?? r.nilai_asli,
       }));
 
-    return NextResponse.json({ ok: true, data });
+    return NextResponse.json({ ok: true, data, batas: await ambilBatasPredikat() });
   } catch (error) {
     console.error("GET /api/ranking:", error);
     return NextResponse.json(

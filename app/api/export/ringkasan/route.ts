@@ -6,6 +6,7 @@ import {
   type RingkasanBaris,
   type RingkasanSiswa,
 } from "@/lib/excel-ringkasan";
+import { ambilBatasPredikat } from "@/lib/predikat-db";
 
 // 128 baris × 21 kolom; butuh waktu lebih lama dari export biasa.
 export const maxDuration = 300;
@@ -61,7 +62,7 @@ export async function GET() {
       urutanSiswa(a.siswa, b.siswa)
     );
 
-    const buffer = await generateRingkasan(baris, mapelNama);
+    const buffer = await generateRingkasan(baris, mapelNama, await ambilBatasPredikat());
     const filename = "ringkasan_nilai_ASTS_GANJIL_2026-2027.xlsx";
 
     return new NextResponse(new Uint8Array(buffer), {

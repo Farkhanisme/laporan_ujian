@@ -1,9 +1,23 @@
 // Uji logika murni (tanpa database): predikat, urutan, nama sheet Excel.
 // Jalankan: npm run cek:logic
-import { deskripsiNilai, predikat, predikatDenganKeterangan } from "../lib/predikat.ts";
+import {
+  BATAS_AWAL,
+  batasAtas,
+  deskripsiNilai,
+  predikat,
+  predikatDenganKeterangan,
+  predikatLabel,
+  type BatasPredikat,
+} from "../lib/predikat.ts";
+import { validasiBatasPredikat } from "../lib/validasi.ts";
+import { hitungRanking, rataKelas } from "../lib/ranking.ts";
+
+/** Batas bawah sebuah predikat, untuk memeriksa rentang tidak bolong. */
+function rentangBawahPredikat(p: "A" | "B" | "C" | "D", batas: BatasPredikat): number {
+  return p === "D" ? 0 : batas[`min${p}` as "minA" | "minB" | "minC"];
+}
 import { urutanMapel, urutanSiswa, bisaPindahKelas, URUTAN_KELAS } from "../lib/urutan.ts";
 import { namaSheet, sanitizeFilename } from "../lib/nama-sheet.ts";
-import { hitungRanking, rataKelas } from "../lib/ranking.ts";
 
 let gagal = 0;
 
@@ -19,28 +33,84 @@ function cek(nama: string, aktual: unknown, diharapkan: unknown) {
   }
 }
 
-console.log("--- predikat (batas 76/77, 84/85, 92/93) ---");
-cek("predikat(93) = A", predikat(93), "A");
-cek("predikat(100) = A", predikat(100), "A");
-cek("predikat(92) = B", predikat(92), "B");
-cek("predikat(85) = B", predikat(85), "B");
-cek("predikat(84) = C", predikat(84), "C");
-cek("predikat(77) = C", predikat(77), "C");
-cek("predikat(76) = D", predikat(76), "D");
-cek("predikat(0) = D", predikat(0), "D");
+console.log("--- predikat memakai batas bawaan (batas 76/77, 84/85, 92/93) ---");
+const b = BATAS_AWAL;
+cek("predikat(93) = A", predikat(93, b), "A");
+cek("predikat(100) = A", predikat(100, b), "A");
+cek("predikat(92) = B", predikat(92, b), "B");
+cek("predikat(85) = B", predikat(85, b), "B");
+cek("predikat(84) = C", predikat(84, b), "C");
+cek("predikat(77) = C", predikat(77, b), "C");
+cek("predikat(76) = D", predikat(76, b), "D");
+cek("predikat(0) = D", predikat(0, b), "D");
 
 console.log("\n--- keterangan predikat (ditulis di samping hurufnya) ---");
-cek("predikatDenganKeterangan(93) = A (Sangat Baik)", predikatDenganKeterangan(predikat(93)), "A (Sangat Baik)");
-cek("predikatDenganKeterangan(85) = B (Baik)", predikatDenganKeterangan(predikat(85)), "B (Baik)");
-cek("predikatDenganKeterangan(77) = C (Cukup)", predikatDenganKeterangan(predikat(77)), "C (Cukup)");
-cek("predikatDenganKeterangan(56) = D (Kurang)", predikatDenganKeterangan(predikat(56)), "D (Kurang)");
+cek("predikatDenganKeterangan(93) = A (Sangat Baik)", predikatDenganKeterangan(predikat(93, b)), "A (Sangat Baik)");
+cek("predikatDenganKeterangan(85) = B (Baik)", predikatDenganKeterangan(predikat(85, b)), "B (Baik)");
+cek("predikatDenganKeterangan(77) = C (Cukup)", predikatDenganKeterangan(predikat(77, b)), "C (Cukup)");
+cek("predikatDenganKeterangan(56) = D (Kurang)", predikatDenganKeterangan(predikat(56, b)), "D (Kurang)");
 
-console.log("\n--- deskripsi nilai (batas tuntas 77) ---");
-cek("deskripsiNilai(100) = Tuntas", deskripsiNilai(100), "Tuntas");
-cek("deskripsiNilai(93) = Tuntas", deskripsiNilai(93), "Tuntas");
-cek("deskripsiNilai(77) = Tuntas (tepat batas)", deskripsiNilai(77), "Tuntas");
-cek("deskripsiNilai(76) = Belum Tuntas", deskripsiNilai(76), "Belum Tuntas");
-cek("deskripsiNilai(0) = Belum Tuntas", deskripsiNilai(0), "Belum Tuntas");
+console.log("\n--- deskripsi nilai memakai batas tuntas ---");
+cek("deskripsiNilai(100) = Tuntas", deskripsiNilai(100, b), "Tuntas");
+cek("deskripsiNilai(93) = Tuntas", deskripsiNilai(93, b), "Tuntas");
+cek("deskripsiNilai(77) = Tuntas (tepat batas)", deskripsiNilai(77, b), "Tuntas");
+cek("deskripsiNilai(76) = Belum Tuntas", deskripsiNilai(76, b), "Belum Tuntas");
+cek("deskripsiNilai(0) = Belum Tuntas", deskripsiNilai(0, b), "Belum Tuntas");
+
+console.log("\n--- batas predikat kustom mengubah hasil ---");
+const kustom: BatasPredikat = { minA: 80, minB: 70, minC: 60, batasTuntas: 60 };
+cek("batas kustom: predikat(90) = A", predikat(90, kustom), "A");
+cek("batas kustom: predikat(75) = B", predikat(75, kustom), "B");
+cek("batas kustom: predikat(65) = C", predikat(65, kustom), "C");
+cek("batas kustom: predikat(50) = D", predikat(50, kustom), "D");
+// Titik yang sama bisa punya predikat berbeda bila batasnya berbeda.
+cek("nilai 77 dengan batas bawaan = C", predikat(77, BATAS_AWAL), "C");
+cek("nilai 77 dengan batas kustom = B (di bawah minA 80, di atas minB 70)", predikat(77, kustom), "B");
+
+console.log("\n--- batas atas diturunkan dari batas bawah ---");
+cek("batas atas A = 100", batasAtas("A", BATAS_AWAL), 100);
+cek("batas atas B = minA - 1", batasAtas("B", BATAS_AWAL), 92);
+cek("batas atas C = minB - 1", batasAtas("C", BATAS_AWAL), 84);
+cek("batas atas D = minC - 1", batasAtas("D", BATAS_AWAL), 76);
+
+console.log("\n--- label ikut mengikuti batas yang berlaku ---");
+cek("label A bawaan", predikatLabel("A", BATAS_AWAL), "A (93–100)");
+cek("label B bawaan", predikatLabel("B", BATAS_AWAL), "B (85–92)");
+cek("label C bawaan", predikatLabel("C", BATAS_AWAL), "C (77–84)");
+cek("label D bawaan", predikatLabel("D", BATAS_AWAL), "D (0–76)");
+cek("label A kustom", predikatLabel("A", kustom), "A (80–100)");
+cek("label D kustom (bawah selalu 0)", predikatLabel("D", kustom), "D (0–59)");
+
+console.log("\n--- rentang tidak pernah bertindih atau bolong ---");
+cek("setiap nilai 0..100 selalu punya tepat satu rentang", (() => {
+  for (let n = 0; n <= 100; n++) {
+    const p = predikat(n, kustom);
+    if (n < rentangBawahPredikat(p, kustom) || n > batasAtas(p, kustom)) return false;
+  }
+  return true;
+})(), true);
+
+console.log("\n--- batas tuntas terpisah dari batas C ---");
+// Batas tuntas sengaja tidak otomatis ikut minC: guru boleh memilih KKM
+// yang berbeda dari batas predikat C.
+const kkm = { ...BATAS_AWAL, batasTuntas: 80 };
+cek("KKM 80: nilai 80 = Tuntas", deskripsiNilai(80, kkm), "Tuntas");
+cek("KKM 80: nilai 79 = Belum Tuntas", deskripsiNilai(79, kkm), "Belum Tuntas");
+cek("KKM 80: predikat(79) tetap C", predikat(79, kkm), "C");
+cek("batas tuntas tidak mengubah predikat", predikat(79, kkm), predikat(79, BATAS_AWAL));
+cek("batas tuntas boleh 0", deskripsiNilai(0, { ...BATAS_AWAL, batasTuntas: 0 }), "Tuntas");
+
+console.log("\n--- validasi batas predikat menolak yang tidak menurun ---");
+cek("A > B > C sah", validasiBatasPredikat({ minA: 93, minB: 85, minC: 77, batasTuntas: 77 }).success, true);
+cek("A = B ditolak", validasiBatasPredikat({ minA: 85, minB: 85, minC: 77, batasTuntas: 77 }).success, false);
+cek("B < C ditolak", validasiBatasPredikat({ minA: 93, minB: 70, minC: 77, batasTuntas: 77 }).success, false);
+cek("nilai di luar 0-100 ditolak", validasiBatasPredikat({ minA: 93, minB: 85, minC: 101, batasTuntas: 77 }).success, false);
+cek("batas tuntas di luar 0-100 ditolak", validasiBatasPredikat({ minA: 93, minB: 85, minC: 77, batasTuntas: 101 }).success, false);
+cek("desimal ditolak", validasiBatasPredikat({ minA: 93.5, minB: 85, minC: 77, batasTuntas: 77 }).success, false);
+cek("min 0 ditolak (D selalu 0)", validasiBatasPredikat({ minA: 93, minB: 85, minC: 0, batasTuntas: 77 }).success, false);
+cek("batas tuntas 0 boleh", validasiBatasPredikat({ minA: 93, minB: 85, minC: 77, batasTuntas: 0 }).success, true);
+cek("batas rapat boleh (90/80/70)", validasiBatasPredikat({ minA: 90, minB: 80, minC: 70, batasTuntas: 70 }).success, true);
+cek("pesan A harus lebih besar", validasiBatasPredikat({ minA: 85, minB: 85, minC: 77, batasTuntas: 77 }).error?.issues[0].message, "Batas A harus lebih besar dari batas B.");
 
 console.log("\n--- urutan mapel ---");
 const seedMapel = [

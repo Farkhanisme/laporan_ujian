@@ -56,6 +56,26 @@ export const dongkrakSchema = z.object({
 
 export type DongkrakInput = z.infer<typeof dongkrakSchema>;
 
+const batasPredikatSchema = z.object({
+  minA: z.number({ message: "Batas bawah harus bilangan bulat 0–100." }).int().min(1, "Batas bawah minimal 1.").max(100, "Batas bawah maksimal 100."),
+  minB: z.number({ message: "Batas bawah harus bilangan bulat 0–100." }).int().min(1, "Batas bawah minimal 1.").max(100, "Batas bawah maksimal 100."),
+  minC: z.number({ message: "Batas bawah harus bilangan bulat 0–100." }).int().min(1, "Batas bawah minimal 1.").max(100, "Batas bawah maksimal 100."),
+  batasTuntas: z.number({ message: "Batas tuntas harus bilangan bulat 0–100." }).int().min(0, "Batas tuntas minimal 0.").max(100, "Batas tuntas maksimal 100."),
+})
+  // Batas harus menurun ketat. Tanpa ini, rentang bisa tumpang tindih (mis. A
+  // mulai 80 dan B mulai 80) sehingga satu nilai punya dua predikat, atau
+  // menyisakan nilai yang tidak punya predikat sama sekali.
+  .refine((d) => d.minA > d.minB, {
+    message: "Batas A harus lebih besar dari batas B.",
+    path: ["minA"],
+  })
+  .refine((d) => d.minB > d.minC, {
+    message: "Batas B harus lebih besar dari batas C.",
+    path: ["minB"],
+  });
+
+export type BatasPredikatInput = z.infer<typeof batasPredikatSchema>;
+
 export function validasiSiswa(data: unknown) {
   return siswaSchema.safeParse(data);
 }
@@ -85,4 +105,8 @@ export type MapelBaruInput = z.infer<typeof mapelBaruSchema>;
 
 export function validasiMapelBaru(data: unknown) {
   return mapelBaruSchema.safeParse(data);
+}
+
+export function validasiBatasPredikat(data: unknown) {
+  return batasPredikatSchema.safeParse(data);
 }

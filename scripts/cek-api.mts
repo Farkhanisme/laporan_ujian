@@ -5,6 +5,7 @@ import { createClient } from "@libsql/client";
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import ExcelJS from "exceljs";
+import type { BatasPredikat } from "../lib/predikat";
 
 const dbUji = path.join(process.cwd(), "scripts/cek-api.sqlite");
 process.env.TURSO_DATABASE_URL = `file:${dbUji}`;
@@ -27,8 +28,20 @@ const { GET: getMapel, POST: postMapel } = await import("../app/api/mapel/route"
 const { GET: getRingkasan } = await import("../app/api/export/ringkasan/route");
 const { GET: getRanking } = await import("../app/api/ranking/route");
 const { GET: getExportRanking } = await import("../app/api/export/ranking/route");
+const { GET: getPredikat, PUT: putPredikat, DELETE: deletePredikat } = await import(
+  "../app/api/predikat/route"
+);
+const { POST: postPreviewPredikat } = await import("../app/api/predikat/preview/route");
 const { hitungRanking } = await import("../lib/ranking");
-const { predikat } = await import("../lib/predikat");
+const { predikat, BATAS_AWAL } = await import("../lib/predikat");
+
+/**
+ * Batas predikat yang berlaku saat ini, dibaca lewat API publik — bukan
+ * langsung dari tabel — supaya yang diuji benar-benar batas yang dipakai
+ * server dan semua exporter. Diisi oleh blok "pengaturan predikat" di bawah,
+ * setelah helper `cek` siap dipakai.
+ */
+let batasBerlaku: BatasPredikat = BATAS_AWAL;
 
 const db = createClient({ url: process.env.TURSO_DATABASE_URL });
 
@@ -986,7 +999,7 @@ console.log("\n=== ranking: peringkat per kelas dari nilai akhir ===");
     cek(
       "predikat export sama dengan predikat dari rata-rata",
       kolomEkspor(5),
-      layar.map((b) => predikat(b.rata))
+      layar.map((b) => predikat(b.rata, batasBerlaku))
     );
     // Semua baris harus kelas yang sama karena satu berkas = satu kelas.
     cek(
@@ -1211,7 +1224,7 @@ console.log("\n=== ranking: peringkat per kelas dari nilai akhir ===");
       kolom(6).every((v) => v === "A" || v === "B" || v === "C" || v === "D"),
       true
     );
-    cek("sheet: predikat cocok dengan nilai", kolom(6), layar.map((b) => predikat(b.rata)));
+    cek("sheet: predikat cocok dengan nilai", kolom(6), layar.map((b) => predikat(b.rata, batasBerlaku)));
 
     // Semua sheet punya bentuk dan isi yang sama.
     cek(
@@ -1242,6 +1255,188 @@ console.log("\n=== ranking: peringkat per kelas dari nilai akhir ===");
     await wbRata.xlsx.load(Buffer.from(await resRata.arrayBuffer()) as any);
     cek("mode rata-rata tetap 1 sheet", wbRata.worksheets.length, 1);
     cek("mode rata-rata tetap RATA-RATA", wbRata.worksheets[0].getCell("D1").value, "RATA-RATA");
+  }
+}
+
+console.log("\n=== pengaturan predikat: batas bawah, batas tuntas, dan dampaknya ===");
+{
+  // Sebaran bawaan, dibandingkan lagi setelah batas diubah lalu dikembalikan.
+  let hitungAwal = { A: 0, B: 0, C: 0, D: 0 };
+
+  // Batas yang berlaku dibaca lewat API, lalu dipakai exporter di bawah.
+  {
+    const j = await json(await getPredikat(req("/api/predikat")));
+    cek("GET /api/predikat ok", j.ok, true);
+    batasBerlaku = j.data.batas;
+
+    // Tabel migration harus sudah terisi baris bawaan.
+    cek("batas bawaan terisi", batasBerlaku, { minA: 93, minB: 85, minC: 77, batasTuntas: 77 });
+    cek("tandai masih memakai bawaan", j.data.memakaiBawaan, true);
+    cek("rentang A = 93-100", j.data.rentang[0], { predikat: "A", bawah: 93, atas: 100 });
+    cek("rentang B = 85-92", j.data.rentang[1], { predikat: "B", bawah: 85, atas: 92 });
+    cek("rentang C = 77-84", j.data.rentang[2], { predikat: "C", bawah: 77, atas: 84 });
+    cek("rentang D = 0-76", j.data.rentang[3], { predikat: "D", bawah: 0, atas: 76 });
+
+    // Sebaran harus cocok dengan perhitungan ulang dari nilai mentah.
+    const semua = (
+      (await (await db.execute({ sql: "SELECT COALESCE(nilai_dongkrak, nilai_asli) AS n FROM nilai", args: [] }))).rows
+    ) as unknown as Array<{ n: number }>;
+    const hitung = { A: 0, B: 0, C: 0, D: 0 };
+    for (const r of semua) hitung[predikat(Number(r.n), batasBerlaku)] += 1;
+    cek("sebaran awal = hitungan ulang", j.data.sebar, hitung);
+    cek("total sebaran = 2048 nilai", Object.values(hitung).reduce((a, b) => a + b, 0), 2048);
+
+    // Disimpan supaya blok "kembalikan ke awal" bisa membandingkannya.
+    hitungAwal = { ...hitung };
+  }
+
+  // Validasi menolak batas yang tidak menurun ketat.
+  const tidakNaik = await putPredikat(
+    bodyReq("/api/predikat", { minA: 85, minB: 85, minC: 77, batasTuntas: 77 }, "PUT")
+  );
+  cek("A = B ditolak 400", tidakNaik.status, 400);
+  cek("pesan A harus lebih besar", (await json(tidakNaik)).error, "Batas A harus lebih besar dari batas B.");
+
+  const tidakNaik2 = await putPredikat(
+    bodyReq("/api/predikat", { minA: 93, minB: 70, minC: 77, batasTuntas: 77 }, "PUT")
+  );
+  cek("B < C ditolak 400", tidakNaik2.status, 400);
+
+  const melebihi100 = await putPredikat(
+    bodyReq("/api/predikat", { minA: 93, minB: 85, minC: 101, batasTuntas: 77 }, "PUT")
+  );
+  cek("batas di luar 100 ditolak 400", melebihi100.status, 400);
+
+  // Pratinjau: batas 80/70/60 harus mengubah sebaran secara nyata.
+  const pratinjau = await postPreviewPredikat(
+    bodyReq("/api/predikat/preview", { minA: 80, minB: 70, minC: 60, batasTuntas: 60 })
+  );
+  {
+    const j = await json(pratinjau);
+    cek("POST preview ok", j.ok, true);
+    cek("preview: sebelum = sebaran bawaan", j.data.sebelum, hitungAwal);
+    cek("preview: sesudah benar-benar berbeda", j.data.sesudah.A > j.data.sebelum.A, true);
+    cek("preview: rentang ikut batas baru", j.data.rentang[0], { predikat: "A", bawah: 80, atas: 100 });
+    cek("preview: total sesudah tetap 2048", Object.values(j.data.sesudah).reduce((a, b) => a + b, 0), 2048);
+  }
+
+  // Pratinjau tidak boleh menolak batas yang sah, dan menolak yang tidak sah.
+  const previewSah = await postPreviewPredikat(
+    bodyReq("/api/predikat/preview", { minA: 90, minB: 80, minC: 70, batasTuntas: 70 })
+  );
+  cek("preview batas rapat sah", previewSah.status, 200);
+  const previewTidakSah = await postPreviewPredikat(
+    bodyReq("/api/predikat/preview", { minA: 70, minB: 80, minC: 90, batasTuntas: 70 })
+  );
+  cek("preview batas tidak menurun ditolak", previewTidakSah.status, 400);
+
+  // Simpan batas kustom, lalu buktikan SEMUA exporter ikut memakainya.
+  const kustom = { minA: 80, minB: 70, minC: 60, batasTuntas: 70 };
+  const simpan = await putPredikat(bodyReq("/api/predikat", kustom, "PUT"));
+  cek("PUT batas kustom ok", simpan.status, 200);
+  {
+    const j = await json(simpan);
+    cek("PUT mengembalikan batas tersimpan", j.data.batas, kustom);
+  }
+
+  {
+    const j = await json(await getPredikat(req("/api/predikat")));
+    cek("GET setelah simpan = batas kustom", j.data.batas, kustom);
+    cek("tandai bukan bawaan", j.data.memakaiBawaan, false);
+    cek("rentang A = 80-100", j.data.rentang[0], { predikat: "A", bawah: 80, atas: 100 });
+    cek("rentang D = 0-59", j.data.rentang[3], { predikat: "D", bawah: 0, atas: 59 });
+  }
+
+  // Batas kustom harus dipakai di API nilai...
+  {
+    const j = await json(await getNilai(req("/api/nilai?kelas=7A&mapel=IPA")));
+    cek("API nilai ikut mengembalikan batas kustom", j.batas, kustom);
+    // Setiap predikat yang dikirim harus cocok dengan batas kustom.
+    cek(
+      "predikat di API nilai cocok dengan batas kustom",
+      j.data.every((r: any) => r.predikat === predikat(r.nilai_akhir, kustom)),
+      true
+    );
+    // Harus ada nilai yang predikatnya BERBEDA dari batas bawaan; kalau tidak,
+    // uji ini tidak membuktikan apa-apa.
+    const beda = j.data.filter((r: any) => r.predikat !== predikat(r.nilai_akhir, BATAS_AWAL)).length;
+    cek("ada nilai yang predikatnya berubah (uji berarti)", beda > 0, true);
+  }
+
+  // ...dan di raport...
+  {
+    const buf = Buffer.from(
+      await (
+        await getRaport(req("/api/export/raport/1"), { params: Promise.resolve({ siswaId: "1" }) })
+      ).arrayBuffer()
+    );
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as any);
+    const ws = wb.worksheets[0];
+    const baris = Array.from({ length: 16 }, (_, i) => i + 5);
+    const adaYangBerbeda = baris.some((r) => {
+      const nilai = Number(ws.getCell(r, 3).value);
+      return ws.getCell(r, 4).value === predikat(nilai, kustom) &&
+        ws.getCell(r, 4).value !== predikat(nilai, BATAS_AWAL);
+    });
+    cek("raport memakai batas kustom", adaYangBerbeda, true);
+  }
+
+  // ...dan di ringkasan (predikat bertulis + keterangan ketuntasan).
+  {
+    const buf = Buffer.from(await (await getRingkasan(req("/api/export/ringkasan"))).arrayBuffer());
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as any);
+    const ws = wb.worksheets[0];
+    // 53 kolom: tiap mapel 3 kolom (nilai, predikat, deskripsi), mulai kolom 6.
+    let cekPredikat = 0;
+    let cekDeskripsi = 0;
+    for (let b = 3; b <= 130; b++) {
+      for (let k = 6; k <= 53; k += 3) {
+        const nilai = ws.getCell(b, k).value;
+        if (typeof nilai !== "number") continue;
+        const teks = String(ws.getCell(b, k + 1).value ?? "");
+        if (teks.startsWith(`${predikat(nilai, kustom)} (`)) cekPredikat++;
+        const desk = String(ws.getCell(b, k + 2).value ?? "");
+        if (desk === (nilai >= kustom.batasTuntas ? "Tuntas" : "Belum Tuntas")) cekDeskripsi++;
+      }
+    }
+    cek("ringkasan memakai batas predikat kustom", cekPredikat, 2048);
+    cek("ringkasan memakai batas tuntas kustom", cekDeskripsi, 2048);
+  }
+
+  // ...dan di ranking.
+  {
+    const buf = Buffer.from(await (await getExportRanking(req("/api/export/ranking?kelas=7A"))).arrayBuffer());
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as any);
+    const ws = wb.worksheets[0];
+    const cocok = Array.from({ length: ws.rowCount - 1 }, (_, i) => {
+      const r = i + 2;
+      return ws.getCell(r, 5).value === predikat(Number(ws.getCell(r, 4).value), kustom);
+    });
+    cek("ranking memakai batas kustom", cocok.every(Boolean), true);
+  }
+
+  // Kembalikan ke awal.
+  {
+    const kembalikan = await deletePredikat(req("/api/predikat"), { method: "DELETE" });
+    cek("DELETE kembali ke awal ok", kembalikan.status, 200);
+    const j = await json(await getPredikat(req("/api/predikat")));
+    cek("batas kembali ke bawaan", j.data.batas, { minA: 93, minB: 85, minC: 77, batasTuntas: 77 });
+    cek("tandai memakai bawaan lagi", j.data.memakaiBawaan, true);
+    cek("sebaran kembali seperti semula", j.data.sebar, hitungAwal);
+  }
+
+  // Batas yang sama di dua baris tidak boleh melanggar CHECK di database.
+  {
+    await db.execute({ sql: "UPDATE batas_predikat SET min_a = 85 WHERE id = 1", args: [] }).catch(() => {
+      // CHECK di tabel yang menolak: itu yang diharapkan.
+    });
+    const j = await json(await getPredikat(req("/api/predikat")));
+    cek("batas tetap utuh setelah penolakan CHECK", j.data.batas, {
+      minA: 93, minB: 85, minC: 77, batasTuntas: 77,
+    });
   }
 }
 

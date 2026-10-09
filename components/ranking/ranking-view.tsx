@@ -25,7 +25,7 @@ import { PredikatBadge } from "@/components/predikat-badge";
 import { StatCard } from "@/components/stat-card";
 import { TableSkeleton } from "@/components/skeleton";
 import { hitungRanking, rataKelas, type BarisNilai } from "@/lib/ranking";
-import { predikat } from "@/lib/predikat";
+import { BATAS_AWAL, predikat, type BatasPredikat } from "@/lib/predikat";
 import { urutanMapel } from "@/lib/urutan";
 import {
   ChevronDown,
@@ -70,6 +70,7 @@ export function RankingView({
   const [mapel, setMapel] = useState(mapelAwal ?? SEMUA_MAPEL);
   const [daftarMapel, setDaftarMapel] = useState<string[]>([]);
   const [raw, setRaw] = useState<BarisNilai[]>([]);
+  const [batas, setBatas] = useState<BatasPredikat>(BATAS_AWAL);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
@@ -114,6 +115,9 @@ export function RankingView({
         if (batal) return;
         if (!json.ok) throw new Error(json.error);
         setRaw(json.data);
+        // Batas ikut terkirim supaya predikat di layar sama dengan yang dipakai
+        // server. Tanpa ini, badge diam-diam memakai batas bawaan.
+        if (json.batas) setBatas(json.batas);
         setError(null);
       } catch (err) {
         if (batal) return;
@@ -166,7 +170,7 @@ export function RankingView({
   const perMapel = mapel !== SEMUA_MAPEL;
   // Judul kolom berubah supaya tidak menyebut "rata-rata" untuk satu nilai.
   const judulAngka = perMapel ? "Nilai" : "Rata-rata";
-  const predikatKelas = predikat(statistik.rata);
+  const predikatKelas = predikat(statistik.rata, batas);
 
   async function unduh() {
     setDownloading(true);
@@ -336,7 +340,7 @@ export function RankingView({
                     </TableCell>
 
                     <TableCell className="text-center">
-                      <PredikatBadge nilai={b.angka} />
+                      <PredikatBadge nilai={b.angka} batas={batas} />
                     </TableCell>
                   </TableRow>
                 );

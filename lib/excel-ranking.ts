@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import type { BarisRanking } from "./ranking";
-import { predikat } from "./predikat";
+import { predikat, type BatasPredikat } from "./predikat";
 import { namaSheet } from "./nama-sheet";
 
 /** Judul kolom saat ranking berdasarkan seluruh mapel (rata-rata). */
@@ -62,18 +62,24 @@ const TANPA_LATAR = {
  *
  * @param baris hasil `hitungRanking`, sudah terurut dan sudah berperingkat
  * @param mapel nama mapel; `undefined` berarti seluruh mapel
+ * @param batas batas predikat yang sedang berlaku
  */
 export function isiSheetRanking(
   ws: ExcelJS.Worksheet,
   baris: BarisRanking[],
+  batas: BatasPredikat,
   mapel?: string
 ) {
-  if (mapel === undefined) isiSheetSemuaMapel(ws, baris);
-  else isiSheetSatuMapel(ws, baris, mapel);
+  if (mapel === undefined) isiSheetSemuaMapel(ws, baris, batas);
+  else isiSheetSatuMapel(ws, baris, mapel, batas);
 }
 
 /** Tabel ranking dari seluruh mapel: angka kolom keempat adalah rata-rata. */
-function isiSheetSemuaMapel(ws: ExcelJS.Worksheet, baris: BarisRanking[]) {
+function isiSheetSemuaMapel(
+  ws: ExcelJS.Worksheet,
+  baris: BarisRanking[],
+  batas: BatasPredikat
+) {
   const jumlahKolom = HEADER_RANKING.length;
 
   ws.getRow(1).height = 24;
@@ -112,7 +118,7 @@ function isiSheetSemuaMapel(ws: ExcelJS.Worksheet, baris: BarisRanking[]) {
     rata.border = GARI;
 
     const predikatCell = ws.getCell(n, 5);
-    predikatCell.value = predikat(b.rata);
+    predikatCell.value = predikat(b.rata, batas);
     predikatCell.alignment = RATA_TENGAH;
     predikatCell.border = GARI;
   });
@@ -129,7 +135,12 @@ function isiSheetSemuaMapel(ws: ExcelJS.Worksheet, baris: BarisRanking[]) {
  * per siswa), jadi kolomnya ditulis sebagai ANGKA BULAT dengan judul NILAI,
  * bukan sebagai rata-rata satu desimal.
  */
-function isiSheetSatuMapel(ws: ExcelJS.Worksheet, baris: BarisRanking[], mapel: string) {
+function isiSheetSatuMapel(
+  ws: ExcelJS.Worksheet,
+  baris: BarisRanking[],
+  mapel: string,
+  batas: BatasPredikat
+) {
   const jumlahKolom = HEADER_RANKING_MAPEL.length;
 
   ws.getRow(1).height = 24;
@@ -173,7 +184,7 @@ function isiSheetSatuMapel(ws: ExcelJS.Worksheet, baris: BarisRanking[], mapel: 
     nilai.border = GARI;
 
     const predikatCell = ws.getCell(n, 6);
-    predikatCell.value = predikat(b.rata);
+    predikatCell.value = predikat(b.rata, batas);
     predikatCell.alignment = RATA_TENGAH;
     predikatCell.border = GARI;
   });
@@ -215,11 +226,12 @@ function kolomKe(n: number): string {
 /** Ranking satu kelas dari seluruh mapel: satu sheet. */
 export async function generateRanking(
   baris: BarisRanking[],
-  kelas: string
+  kelas: string,
+  batas: BatasPredikat
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   const ws = workbook.addWorksheet(`Ranking Kelas ${kelas}`);
-  isiSheetRanking(ws, baris);
+  isiSheetRanking(ws, baris, batas);
 
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(buffer);
@@ -240,7 +252,8 @@ export interface SheetRankingMapel {
  */
 export async function generateRankingSemuaMapel(
   daftar: SheetRankingMapel[],
-  kelas: string
+  kelas: string,
+  batas: BatasPredikat
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   const dipakai = new Set<string>();
@@ -252,7 +265,7 @@ export async function generateRankingSemuaMapel(
 
   for (const { mapel, baris } of daftar) {
     const ws = workbook.addWorksheet(namaSheet(`Ranking ${mapel}`, dipakai));
-    isiSheetRanking(ws, baris, mapel);
+    isiSheetRanking(ws, baris, batas, mapel);
   }
 
   const buffer = await workbook.xlsx.writeBuffer();

@@ -3,6 +3,7 @@ import type { InValue } from "@libsql/client";
 import { db } from "@/lib/db";
 import { validasiNilaiBatch } from "@/lib/validasi";
 import { predikat } from "@/lib/predikat";
+import { ambilBatasPredikat } from "@/lib/predikat-db";
 import { urutanSiswa, urutanMapel } from "@/lib/urutan";
 
 
@@ -71,13 +72,18 @@ export async function GET(request: NextRequest) {
     const result = await db().execute({ sql, args });
     const raw = result.rows as unknown as RawRow[];
 
+    // Batas predikat ikut dikembalikan ke klien supaya badge di layar memakai
+    // batas yang sama dengan yang dipakai server — bukan mengambilnya sendiri
+    // lewat permintaan tambahan.
+    const batas = await ambilBatasPredikat();
+
     const data: NilaiApiRow[] = raw
       .map((r) => {
         const nilai_akhir = r.nilai_dongkrak ?? r.nilai_asli;
         return {
           ...r,
           nilai_akhir,
-          predikat: predikat(nilai_akhir),
+          predikat: predikat(nilai_akhir, batas),
         };
       })
       .sort((a, b) => {
@@ -86,7 +92,7 @@ export async function GET(request: NextRequest) {
         return urutanMapel(a.mapel, b.mapel);
       });
 
-    return NextResponse.json({ ok: true, data });
+    return NextResponse.json({ ok: true, data, batas });
   } catch (error) {
     console.error("GET /api/nilai:", error);
     return NextResponse.json({ ok: false, error: "Gagal memuat data nilai." }, { status: 500 });

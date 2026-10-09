@@ -1,5 +1,10 @@
 import ExcelJS from "exceljs";
-import { deskripsiNilai, predikat, predikatDenganKeterangan } from "./predikat";
+import {
+  deskripsiNilai,
+  predikat,
+  predikatDenganKeterangan,
+  type BatasPredikat,
+} from "./predikat";
 
 export interface RingkasanSiswa {
   id: number;
@@ -69,11 +74,14 @@ const TANPA_LATAR = {
  * tanpa teks pengganti.
  *
  * @param mapelNama daftar nama mapel, sudah berurutan; menentukan urutan kolom
+ * @param batas batas predikat yang sedang berlaku, supaya predikat di file ini
+ *   sama dengan yang dipakai di layar
  */
 export function isiSheetRingkasan(
   ws: ExcelJS.Worksheet,
   baris: RingkasanBaris[],
-  mapelNama: string[]
+  mapelNama: string[],
+  batas: BatasPredikat
 ) {
   const kolomIdentitas = HEADER_IDENTITAS.length;
   const kolomPerMapel = HEADER_MAPEL.length;
@@ -172,8 +180,8 @@ export function isiSheetRingkasan(
       if (nilai !== undefined) {
         selNilai.value = nilai;
         selNilai.numFmt = "0";
-        selPredikat.value = predikatDenganKeterangan(predikat(nilai));
-        selDeskripsi.value = deskripsiNilai(nilai);
+        selPredikat.value = predikatDenganKeterangan(predikat(nilai, batas));
+        selDeskripsi.value = deskripsiNilai(nilai, batas);
       }
 
       selNilai.alignment = RATA_TENGAH;
@@ -234,11 +242,12 @@ function kolomKe(n: number): string {
 
 export async function generateRingkasan(
   baris: RingkasanBaris[],
-  mapelNama: string[]
+  mapelNama: string[],
+  batas: BatasPredikat
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   const ws = workbook.addWorksheet("Ringkasan");
-  isiSheetRingkasan(ws, baris, mapelNama);
+  isiSheetRingkasan(ws, baris, mapelNama, batas);
 
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(buffer);

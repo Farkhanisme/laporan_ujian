@@ -8,6 +8,7 @@ import {
 } from "@/lib/excel-ranking";
 import { sanitizeFilename } from "@/lib/nama-sheet";
 import { urutanMapel } from "@/lib/urutan";
+import { ambilBatasPredikat } from "@/lib/predikat-db";
 
 interface JoinedRow {
   siswaId: number;
@@ -36,6 +37,10 @@ export async function GET(request: NextRequest) {
     // Kalau memakai `mapel=`, Excel hanya berisi satu sheet — persis kebalikan
     // dari yang dibutuhkan.
     const perMapelDiminta = searchParams.get("perMapel") === "1";
+
+    // Dibaca satu kali dan diteruskan ke semua sheet: mode per mapel bisa
+    // menghasilkan 17 sheet, dan satu query per sheet tidak perlu.
+    const batas = await ambilBatasPredikat();
 
     const result = await db().execute({
       sql: `SELECT s.id AS siswaId,
@@ -85,12 +90,12 @@ export async function GET(request: NextRequest) {
           baris: hitungRanking(baris),
         }));
 
-      buffer = await generateRankingSemuaMapel(daftar, kelas);
+      buffer = await generateRankingSemuaMapel(daftar, kelas, batas);
       filename = `ranking_nilai_kelas_${kelas}_per_mapel_ASTS_GANJIL_2026-2027.xlsx`;
     } else {
       // Mode rata-rata: satu sheet, ranking dari seluruh mapel.
       const semuaBaris = [...perMapel.values()].flat();
-      buffer = await generateRanking(hitungRanking(semuaBaris), kelas);
+      buffer = await generateRanking(hitungRanking(semuaBaris), kelas, batas);
       filename = `ranking_nilai_kelas_${kelas}_ASTS_GANJIL_2026-2027.xlsx`;
     }
 
