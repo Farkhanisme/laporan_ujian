@@ -4,6 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -14,9 +21,12 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { EmptyState } from "@/components/empty-state";
 import { KelasTabs } from "@/components/kelas-tabs";
+import { PredikatBadge } from "@/components/predikat-badge";
 import { StatCard } from "@/components/stat-card";
 import { TableSkeleton } from "@/components/skeleton";
 import { hitungRanking, rataKelas, type BarisNilai } from "@/lib/ranking";
+import { predikat } from "@/lib/predikat";
+import { urutanMapel } from "@/lib/urutan";
 import {
   ChevronDown,
   ChevronUp,
@@ -28,10 +38,14 @@ import {
   TrendingUp,
 } from "lucide-react";
 
+/** Nilai khusus: tampil seluruh mapel, dasar ranking adalah rata-rata. */
+const SEMUA_MAPEL = "semua";
+
 interface Baris {
   peringkat: number;
   nama: string;
-  rata: number;
+  /** Angka yang ditampilkan: nilai mapel tunggal, atau rata-rata seluruh mapel. */
+  angka: number;
 }
 
 /**
@@ -45,12 +59,44 @@ function gayaPeringkat(peringkat: number): string {
   return "bg-muted text-muted-foreground";
 }
 
-export function RankingView({ kelasAwal }: { kelasAwal?: string }) {
+export function RankingView({
+  kelasAwal,
+  mapelAwal,
+}: {
+  kelasAwal?: string;
+  mapelAwal?: string;
+}) {
   const [kelas, setKelas] = useState(kelasAwal ?? "7A");
+  const [mapel, setMapel] = useState(mapelAwal ?? SEMUA_MAPEL);
+  const [daftarMapel, setDaftarMapel] = useState<string[]>([]);
   const [raw, setRaw] = useState<BarisNilai[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+
+  // Daftar mapel diambil dari database supaya mapel baru ikut muncul.
+  useEffect(() => {
+    let batal = false;
+
+    (async () => {
+      try {
+        const res = await fetch("/api/mapel");
+        const json = await res.json();
+        if (batal) return;
+        if (json.ok) {
+          setDaftarMapel(
+            [...json.data.map((m: { nama: string }) => m.nama)].sort(urutanMapel)
+          );
+        }
+      } catch {
+        if (!batal) setDaftarMapel([]);
+      }
+    })();
+
+    return () => {
+      batal = true;
+    };
+  }, []);
 
   // Fetch di dalam effect (bukan lewat useCallback) supaya setState hanya
   // terjadi setelah `await`, tidak ada cascading render. Pola yang sama dipakai
@@ -60,7 +106,10 @@ export function RankingView({ kelasAwal }: { kelasAwal?: string }) {
 
     (async () => {
       try {
-        const res = await fetch(`/api/ranking?kelas=${encodeURIComponent(kelas)}`);
+        const params = new URLSearchParams({ kelas });
+        if (mapel !== SEMUA_MAPEL) params.set("mapel", mapel);
+
+        const res = await fetch(`/api/ranking?${params.toString()}`);
         const json = await res.json();
         if (batal) return;
         if (!json.ok) throw new Error(json.error);
@@ -78,13 +127,18 @@ export function RankingView({ kelasAwal }: { kelasAwal?: string }) {
     return () => {
       batal = true;
     };
-  }, [kelas]);
+  }, [kelas, mapel]);
 
+  // Keadaan memuat dipindah ke event handler: kalau ditaruh di dalam effect,
+  // React menandainya sebagai cascading render.
   function gantiKelas(v: string) {
-    // Keadaan memuat di sini, di luar effect: dipanggil dari event handler,
-    // jadi React tidak melihat setState sinkron di dalam body effect.
     setLoading(true);
     setKelas(v);
+  }
+
+  function gantiMapel(v: string) {
+    setLoading(true);
+    setMapel(v);
   }
 
   // Peringkat dihitung di klien dengan fungsi yang sama seperti di ekspor
@@ -92,11 +146,11 @@ export function RankingView({ kelasAwal }: { kelasAwal?: string }) {
   const ranking = useMemo(() => hitungRanking(raw), [raw]);
 
   const baris = useMemo<Baris[]>(
-    () => ranking.map((b) => ({ peringkat: b.peringkat, nama: b.nama, rata: b.rata })),
+    () => ranking.map((b) => ({ peringkat: b.peringkat, nama: b.nama, angka: b.rata })),
     [ranking]
   );
 
-  // `baris` sudah terurut:rating turun, jadi YANG pertama tertinggi dan yang
+  // `ranking` sudah terurut: angka turun, jadi YANG pertama tertinggi dan yang
   // terakhir terendah.
   const statistik = useMemo(() => {
     if (ranking.length === 0) {
@@ -109,16 +163,31 @@ export function RankingView({ kelasAwal }: { kelasAwal?: string }) {
     };
   }, [ranking]);
 
+  const perMapel = mapel !== SEMUA_MAPEL;
+  // Judul kolom berubah supaya tidak menyebut "rata-rata" untuk satu nilai.
+  const judulAngka = perMapel ? "Nilai" : "Rata-rata";
+  const predikatKelas = predikat(statistik.rata);
+
   async function unduh() {
     setDownloading(true);
     try {
-      const res = await fetch(`/api/export/ranking?kelas=${encodeURIComponent(kelas)}`);
+      // Ekspor selalu mengikuti pilihan mapel: mode satu mapel menghasilkan satu
+      // sheet per mapel, mode seluruh mapel menghasilkan satu sheet. Yang
+      // dikirim ke server adalah perMapel=1, BUKAN mapel=IPA — nama mapel tidak
+      // boleh menyaring data di server, karena berkas mode ini memang berisi
+      // seluruh mapel.
+      const params = new URLSearchParams({ kelas });
+      if (perMapel) params.set("perMapel", "1");
+
+      const res = await fetch(`/api/export/ranking?${params.toString()}`);
       if (!res.ok) throw new Error("Gagal membuat berkas ranking.");
 
       const blob = await res.blob();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `ranking_nilai_kelas_${kelas}_ASTS_GANJIL_2026-2027.xlsx`;
+      a.download = perMapel
+        ? `ranking_nilai_kelas_${kelas}_per_mapel_ASTS_GANJIL_2026-2027.xlsx`
+        : `ranking_nilai_kelas_${kelas}_ASTS_GANJIL_2026-2027.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -137,6 +206,22 @@ export function RankingView({ kelasAwal }: { kelasAwal?: string }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <KelasTabs value={kelas} onChange={gantiKelas} />
+
+        <div className="min-w-56 sm:min-w-64">
+          <Select value={mapel} onValueChange={(v) => gantiMapel(v ?? SEMUA_MAPEL)}>
+            <SelectTrigger className="h-9 w-full" aria-label="Mata pelajaran">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={SEMUA_MAPEL}>Rata-rata semua mapel</SelectItem>
+              {daftarMapel.map((m) => (
+                <SelectItem key={m} value={m}>
+                  {m}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
         <Button
           variant="outline"
@@ -169,7 +254,7 @@ export function RankingView({ kelasAwal }: { kelasAwal?: string }) {
             tone="brand"
           />
           <StatCard
-            label="Rata-rata kelas"
+            label={perMapel ? `Rata-rata ${mapel}` : "Rata-rata kelas"}
             value={String(statistik.rata)}
             icon={Trophy}
           />
@@ -181,10 +266,10 @@ export function RankingView({ kelasAwal }: { kelasAwal?: string }) {
             hint={baris[0].nama}
           />
           <StatCard
-            label="Terendah"
-            value={String(statistik.terendah)}
+            label={perMapel ? "Predikat kelas" : "Predikat rata-rata kelas"}
+            value={predikatKelas}
             icon={TrendingDown}
-            hint={baris[baris.length - 1].nama}
+            hint={`dari rata-rata ${statistik.rata}`}
           />
         </div>
       ) : null}
@@ -195,24 +280,29 @@ export function RankingView({ kelasAwal }: { kelasAwal?: string }) {
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-20 text-center">Peringkat</TableHead>
               <TableHead>Nama Siswa</TableHead>
-              <TableHead className="w-32 text-center">Rata-rata</TableHead>
+              <TableHead className="w-32 text-center">{judulAngka}</TableHead>
+              <TableHead className="w-28 text-center">Predikat</TableHead>
             </TableRow>
           </TableHeader>
 
           <TableBody>
             {loading ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={3} className="p-0">
-                  <TableSkeleton baris={10} kolom={3} />
+                <TableCell colSpan={4} className="p-0">
+                  <TableSkeleton baris={10} kolom={4} />
                 </TableCell>
               </TableRow>
             ) : baris.length === 0 ? (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={3} className="p-0">
+                <TableCell colSpan={4} className="p-0">
                   <EmptyState
                     icon={Trophy}
                     title="Belum ada ranking"
-                    description={`Tidak ada nilai untuk kelas ${kelas}.`}
+                    description={
+                      perMapel
+                        ? `Tidak ada nilai ${mapel} untuk kelas ${kelas}.`
+                        : `Tidak ada nilai untuk kelas ${kelas}.`
+                    }
                   />
                 </TableCell>
               </TableRow>
@@ -242,7 +332,11 @@ export function RankingView({ kelasAwal }: { kelasAwal?: string }) {
                     </TableCell>
 
                     <TableCell className="tabular text-center text-base">
-                      {b.rata.toFixed(1)}
+                      {perMapel ? b.angka : b.angka.toFixed(1)}
+                    </TableCell>
+
+                    <TableCell className="text-center">
+                      <PredikatBadge nilai={b.angka} />
                     </TableCell>
                   </TableRow>
                 );
@@ -254,8 +348,19 @@ export function RankingView({ kelasAwal }: { kelasAwal?: string }) {
 
       {!loading && baris.length > 0 ? (
         <p className="text-xs text-muted-foreground">
-          Rata-rata dari seluruh mata pelajaran. Nilai sama mendapat peringkat sama;
-          ranking memakai nilai akhir (setelah aturan dongkrak). Total {baris.length} siswa.
+          {perMapel ? (
+            <>
+              Ranking nilai <span className="font-medium">{mapel}</span>. Nilai sama
+              mendapat peringkat sama. Memakai nilai akhir, jadi aturan dongkrak ikut
+              diperhitungkan. Total {baris.length} siswa.
+            </>
+          ) : (
+            <>
+              Rata-rata dari seluruh mata pelajaran. Nilai sama mendapat peringkat
+              sama; ranking memakai nilai akhir (setelah aturan dongkrak). Total{" "}
+              {baris.length} siswa.
+            </>
+          )}
         </p>
       ) : null}
     </div>

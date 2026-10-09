@@ -238,6 +238,28 @@ console.log("\n--- ranking: rata-rata, urutan, dan peringkat seri ---");
     ...nilai(2, "AHMAD", [70, 70, 70, 70]),
   ]);
   cek("urut seri abjad tidak peka huruf besar/kecil", huruf.map((x) => x.nama), ["AHMAD", "budi"]);
+
+  // Ranking per mapel: tiap siswa punya TEPAT SATU baris nilai, jadi `rata`
+  // harus sama persis dengan nilai mapel itu (tidak ada pembagian yang
+  // mengubahnya) dan `jumlahMapel` selalu 1.
+  const perMapel = hitungRanking([
+    ...nilai(1, "ANDI", [88]),
+    ...nilai(2, "BUDI", [88]),
+    ...nilai(3, "CITRA", [75]),
+    ...nilai(4, "DEDI", [92]),
+  ]);
+  cek("per mapel: jumlahMapel selalu 1", perMapel.map((x) => x.jumlahMapel), [1, 1, 1, 1]);
+  cek("per mapel: angka sama dengan nilai mapel", perMapel.map((x) => x.rata), [92, 88, 88, 75]);
+  cek("per mapel: total sama dengan nilai mapel", perMapel.map((x) => x.total), [92, 88, 88, 75]);
+  cek("per mapel: urut nilai turun", perMapel.map((x) => x.nama), ["DEDI", "ANDI", "BUDI", "CITRA"]);
+  // Seri jauh lebih sering di satu mapel (20 siswa untuk rentang 0-100).
+  cek("per mapel: seri 1, 2, 2, 4", perMapel.map((x) => x.peringkat), [1, 2, 2, 4]);
+
+  // Nilai mapel selalu bulat, jadi tidak boleh muncul desimal yang tidak perlu.
+  cek("per mapel: nilai bulat tidak jadi desimal", perMapel.map((x) => Number.isInteger(x.rata)), [
+    true, true, true, true,
+  ]);
+  cek("per mapel: nilai 0 tetap peringkat terbawah", hitungRanking(nilai(1, "Z", [0]))[0].peringkat, 1);
 }
 
 console.log("\n--- rata-rata kelas ---");

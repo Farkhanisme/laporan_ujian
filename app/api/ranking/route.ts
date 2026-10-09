@@ -18,7 +18,13 @@ interface JoinedRow {
 }
 
 /**
- * GET /api/ranking?kelas=7A
+ * GET /api/ranking?kelas=7A[&mapel=IPA]
+ *
+ * `mapel` opsional:
+ * - tidak diisi -> nilai seluruh mapel (dasar ranking: rata-rata)
+ * - diisi      -> hanya nilai mapel itu. Dalam satu kelas x satu mapel setiap
+ *   siswa punya tepat satu baris nilai, jadi tidak ada rata-rata yang perlu
+ *   dihitung; `hitungRanking` otomatis memakai nilai tunggal itu.
  *
  * Mengembalikan nilai akhir MENTAH, bukan peringkat yang sudah jadi.
  * `hitungRanking` dipanggil di sisi klien dan di ekspor Excel, jadi tidak ada
@@ -26,7 +32,9 @@ interface JoinedRow {
  */
 export async function GET(request: NextRequest) {
   try {
-    const kelas = new URL(request.url).searchParams.get("kelas")?.trim();
+    const { searchParams } = new URL(request.url);
+    const kelas = searchParams.get("kelas")?.trim();
+    const mapel = searchParams.get("mapel")?.trim();
 
     // Tanpa kelas tidak ada ranking yang bermakna (peringkat selalu dihitung
     // di dalam satu kelas), jadi parameter kelas wajib diisi.
@@ -45,8 +53,10 @@ export async function GET(request: NextRequest) {
                    n.nilai_dongkrak
             FROM nilai n
             JOIN siswa s ON s.id = n.siswa_id
-            WHERE s.kelas = ?`,
-      args: [kelas],
+            JOIN mapel m ON m.id = n.mapel_id
+            WHERE s.kelas = ?
+              AND (? = '' OR m.nama = ?)`,
+      args: [kelas, mapel ?? "", mapel ?? ""],
     });
 
     // Nilai akhir: sama seperti raport, ringkasan, dan halaman Nilai.
