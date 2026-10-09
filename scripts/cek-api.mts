@@ -25,6 +25,9 @@ const { GET: getRaport } = await import("../app/api/export/raport/[siswaId]/rout
 const { GET: getSemua } = await import("../app/api/export/semua/route");
 const { GET: getMapel, POST: postMapel } = await import("../app/api/mapel/route");
 const { GET: getRingkasan } = await import("../app/api/export/ringkasan/route");
+const { GET: getRanking } = await import("../app/api/ranking/route");
+const { GET: getExportRanking } = await import("../app/api/export/ranking/route");
+const { hitungRanking } = await import("../lib/ranking");
 
 const db = createClient({ url: process.env.TURSO_DATABASE_URL });
 
@@ -735,6 +738,271 @@ console.log("\n=== ringkasan nilai: satu sheet, nilai + predikat + deskripsi per
   cek("kolom NO+NAMA diulang di halaman kanan", ps.printTitlesColumn, "A:B");
   cek("freeze header (ySplit 2)", ws.views?.[0]?.ySplit, 2);
   cek("freeze kolom nama (xSplit 2)", ws.views?.[0]?.xSplit, 2);
+}
+
+console.log("\n=== ranking: peringkat per kelas dari nilai akhir ===");
+{
+  // Jumlah siswa per kelas dibaca dari database, bukan ditulis di sini:
+  // uji sebelumnya memang memindahkan siswa antar kelas (perpindahan 7A -> 7B),
+  // jadi angka seed sudah tidak berlaku saat blok ini jalan. Yang diuji
+  // adalah kesesuaian API dengan isi database, bukan angka seed.
+  const KELAS = ["7A", "7B", "8A", "8B", "9"];
+  const jumlahSiswaDb = async (kelas: string) => {
+    const res = await db.execute({
+      sql: `SELECT (SELECT COUNT(*) FROM siswa WHERE kelas = ?) AS siswa,
+                   (SELECT COUNT(*) FROM nilai n
+                      JOIN siswa s ON s.id = n.siswa_id
+                     WHERE s.kelas = ?) AS nilai`,
+      args: [kelas, kelas],
+    });
+    const row = res.rows[0] as unknown as { siswa: number; nilai: number };
+    return { siswa: Number(row.siswa), nilai: Number(row.nilai) };
+  };
+
+  // Bandingkan dengan SQL yang menghitung ulang sendiri, bukan lewat fungsi
+  // yang sama dengan yang diuji: kalau keduanya memakai `hitungRanking`, maka
+  // kesalahan yang sama muncul di kedua sisi dan uji ini lolos palsu.
+  const referensiSql = async (kelas: string) => {
+    const res = await db.execute({
+      sql: `SELECT s.nama AS nama,
+                   ROUND(SUM(COALESCE(n.nilai_dongkrak, n.nilai_asli)) * 1.0 /
+                         COUNT(*), 1) AS rata,
+                   COUNT(*) AS jumlahMapel
+            FROM nilai n
+            JOIN siswa s ON s.id = n.siswa_id
+            WHERE s.kelas = ?
+            GROUP BY s.id, s.nama`,
+      args: [kelas],
+    });
+    return res.rows as unknown as Array<{ nama: string; rata: number; jumlahMapel: number }>;
+  };
+
+  const urutAbjad = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });
+
+  for (const kelas of KELAS) {
+    const { siswa: jumlahSiswa, nilai: jumlahNilai } = await jumlahSiswaDb(kelas);
+    const res = await getRanking(req(`/api/ranking?kelas=${kelas}`));
+    cek(`GET /api/ranking?kelas=${kelas} ok`, res.status, 200);
+
+    const json = (await res.json()) as {
+      ok: boolean;
+      data: Array<{ siswaId: number; nama: string; kelas: string; nilai_akhir: number }>;
+    };
+    cek(`API kelas ${kelas} ok`, json.ok, true);
+
+    // API mengembalikan nilai mentah, bukan ranking jadi.
+    cek(
+      `API kelas ${kelas} mengembalikan nilai mentah`,
+      json.data.every((r) => typeof r.siswaId === "number" && typeof r.nilai_akhir === "number" && !("peringkat" in r)),
+      true
+    );
+    cek(
+      `API kelas ${kelas} hanya berisi siswa kelas itu`,
+      new Set(json.data.map((r) => r.kelas)).size === 1 && json.data[0].kelas === kelas,
+      true
+    );
+
+    cek(`kelas ${kelas} = ${jumlahSiswa} siswa`, new Set(json.data.map((r) => r.siswaId)).size, jumlahSiswa);
+    cek(`kelas ${kelas} jumlah baris nilai`, json.data.length, jumlahNilai);
+    // Tiap siswa punya satu baris per mapel tingkatnya (16 untuk semua tingkat).
+    cek(`kelas ${kelas} baris nilai = siswa x 16`, json.data.length, jumlahSiswa * 16);
+
+    // Hitung ranking memakai fungsi yang sama dengan yang dipakai layar & ekspor.
+    const baris = hitungRanking(json.data);
+    cek(`kelas ${kelas} ranking = ${jumlahSiswa} baris`, baris.length, jumlahSiswa);
+
+    // Bandingkan dengan hasil SQL yang menghitung ulang sendiri.
+    const ref = await referensiSql(kelas);
+    const refSorted = [...ref].sort(
+      (a, b) => (a.rata === b.rata ? urutAbjad(a.nama, b.nama) : b.rata - a.rata)
+    );
+
+    cek(
+      `kelas ${kelas} rata-rata sama dengan SQL`,
+      baris.map((b) => b.rata),
+      refSorted.map((r) => Number(r.rata))
+    );
+    cek(
+      `kelas ${kelas} nama urut sama dengan SQL`,
+      baris.map((b) => b.nama),
+      refSorted.map((r) => r.nama)
+    );
+    cek(
+      `kelas ${kelas} jumlahMapel = 16 per siswa`,
+      baris.every((b) => b.jumlahMapel === 16),
+      true
+    );
+
+    // Peringkat: seri memakai angka sama, lalu melompat.
+    const peringkat = baris.map((b) => b.peringkat);
+    cek(`kelas ${kelas} peringkat dimulai dari 1`, peringkat[0], 1);
+    cek(
+      `kelas ${kelas} peringkat naik monoton`,
+      peringkat.every((p, i) => i === 0 || p >= peringkat[i - 1]),
+      true
+    );
+    cek(
+      `kelas ${kelas} peringkat seri ikut rata-rata yang sama`,
+      baris.every((b, i) => i === 0 || b.rata !== baris[i - 1].rata || b.peringkat === baris[i - 1].peringkat),
+      true
+    );
+    // Peringkat tidak boleh melebihi jumlah siswa.
+    cek(
+      `kelas ${kelas} tidak ada peringkat melebihi jumlah siswa`,
+      Math.max(...peringkat) <= jumlahSiswa,
+      true
+    );
+    // Jumlah peringkat unik harus sama dengan jumlah nilai rata-rata berbeda:
+    // tidak boleh ada peringkat yang menyatu tanpa alasan, atau melompat
+    // tanpa ada seri. Ini berlaku apakah pun datanya.
+    cek(
+      `kelas ${kelas} peringkat unik = jumlah rata-rata unik`,
+      new Set(peringkat).size,
+      new Set(baris.map((b) => b.rata)).size
+    );
+  }
+
+  // Ranking memakai nilai AKHIR: terapkan dongkrak lalu peringkat harus dihitung
+  // ulang dari nilai yang sudah berubah.
+  const ambilRanking = async (kelas: string) => {
+    const j = (await (await getRanking(req(`/api/ranking?kelas=${kelas}`))).json()) as {
+      data: Parameters<typeof hitungRanking>[0];
+    };
+    return hitungRanking(j.data);
+  };
+
+  const sebelum = await ambilRanking("7A");
+
+  // RIDZO SETIAWAN punya beberapa nilai di rentang 0-30, jadi aturan
+  // 0-30 -> 30 wajib menaikkan rata-ratenessnya.
+  const namaUji = "RIDZO SETIAWAN";
+  const nilaiUji = (
+    ((await (await getRanking(req("/api/ranking?kelas=7A"))).json()) as {
+      data: Array<{ nama: string; nilai_akhir: number }>;
+    }).data
+  ).filter((r) => r.nama === namaUji);
+  cek(`${namaUji} punya 16 baris nilai`, nilaiUji.length, 16);
+  cek(
+    `${namaUji} punya nilai di rentang dongkrak (1-30)`,
+    nilaiUji.filter((r) => r.nilai_akhir > 0 && r.nilai_akhir <= 30).length >= 2,
+    true
+  );
+  const ridzoSebelum = sebelum.find((b) => b.nama === namaUji)!;
+  cek(`${namaUji} ada di ranking sebelum dongkrak`, typeof ridzoSebelum.peringkat, "number");
+
+  await postDongkrak(bodyReq("/api/dongkrak", { nilai_awal: 0, nilai_akhir: 30, nilai_target: 30 }));
+  const sesudah = await ambilRanking("7A");
+  const ridzoSesudah = sesudah.find((b) => b.nama === namaUji)!;
+  cek(
+    "dongkrak menaikkan rata-rata (nilai 1-30 -> 30)",
+    ridzoSesudah.rata > ridzoSebelum.rata,
+    true
+  );
+  cek(
+    "peringkat dihitung ulang setelah dongkrak",
+    sesudah.every((b, i) => b.rata >= (sesudah[i + 1]?.rata ?? -1)),
+    true
+  );
+  cek("jumlah baris ranking tetap setelah dongkrak", sesudah.length, sebelum.length);
+  await deleteDongkrak(req("/api/dongkrak"));
+
+  // Kelas wajib diisi.
+  const tanpaKelas = await getRanking(req("/api/ranking"));
+  cek("tanpa kelas = 400", tanpaKelas.status, 400);
+  cek(
+    "pesan tanpa kelas",
+    (await json(tanpaKelas)).error,
+    "Parameter kelas wajib diisi."
+  );
+
+  // Kelas yang tidak ada -> data kosong, bukan error.
+  const kelasNgawur = await getRanking(req("/api/ranking?kelas=12Z"));
+  cek("kelas tidak dikenal = 200", kelasNgawur.status, 200);
+  cek("kelas tidak dikenal = data kosong", (await json(kelasNgawur)).data.length, 0);
+
+  // --- Ekspor Excel ---
+  // Kelas 7A dipakai karena siswanya paling sedikit, jadi sheet-nya paling
+  // ringkas untuk diperiksa.
+  {
+    const kelasEkspor = "7A";
+    const { siswa: siswaEkspor } = await jumlahSiswaDb(kelasEkspor);
+    const barisAkhir = siswaEkspor + 1;
+
+    const res = await getExportRanking(req(`/api/export/ranking?kelas=${kelasEkspor}`));
+    cek("GET /api/export/ranking ok", res.status, 200);
+    cek(
+      "tipe konten xlsx",
+      res.headers.get("content-type"),
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    cekBenar(
+      "nama berkas memuat kelas",
+      (res.headers.get("content-disposition") ?? "").includes("ranking_nilai_kelas_7A_ASTS_GANJIL_2026-2027.xlsx")
+    );
+
+    const buf = Buffer.from(await res.arrayBuffer());
+    cek("menghasilkan .xlsx (PK zip)", buf.subarray(0, 2).toString(), "PK");
+
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as any);
+    const ws = wb.worksheets[0];
+    const g = (a: string) => ws.getCell(a).value;
+
+    cek("satu sheet", wb.worksheets.length, 1);
+    cek("nama sheet menyebut kelas", ws.name, `Ranking Kelas ${kelasEkspor}`);
+
+    // Header: RANKING | NAMA | KELAS | RATA-RATA
+    cek("A1 = RANKING", g("A1"), "RANKING");
+    cek("B1 = NAMA", g("B1"), "NAMA");
+    cek("C1 = KELAS", g("C1"), "KELAS");
+    cek("D1 = RATA-RATA", g("D1"), "RATA-RATA");
+    cek("header bold", ws.getCell("A1").font?.bold, true);
+    cek("jumlah kolom = 4", ws.columnCount, 4);
+    cek(`jumlah baris = ${barisAkhir} (1 header + ${siswaEkspor} siswa)`, ws.rowCount, barisAkhir);
+
+    // Baris pertama = peringkat 1, kolom KELAS terisi.
+    cek("A2 = peringkat 1", g("A2"), 1);
+    cek("B2 = nama siswa", typeof g("B2"), "string");
+    cek(`C2 = kelas ${kelasEkspor}`, g("C2"), kelasEkspor);
+    cek("D2 = rata-rata angka", typeof g("D2"), "number");
+    cek("rata-rata format satu desimal", ws.getCell("D2").numFmt, "0.0");
+
+    // Isi export harus identik dengan yang dihitung di layar.
+    const layar = await ambilRanking(kelasEkspor);
+    const kolomEkspor = (c: number) =>
+      Array.from({ length: siswaEkspor }, (_, i) => ws.getCell(i + 2, c).value);
+
+    cek("peringkat export sama dengan di layar", kolomEkspor(1), layar.map((b) => b.peringkat));
+    cek("nama export sama dengan di layar", kolomEkspor(2), layar.map((b) => b.nama));
+    cek("rata-rata export sama dengan di layar", kolomEkspor(4), layar.map((b) => b.rata));
+    // Semua baris harus kelas yang sama karena satu berkas = satu kelas.
+    cek(
+      `semua baris kelas ${kelasEkspor}`,
+      kolomEkspor(3).every((v) => v === kelasEkspor),
+      true
+    );
+    // Tidak boleh ada baris lebih dari jumlah siswa.
+    cek(`tidak ada baris ke-${barisAkhir + 1}`, ws.getRow(barisAkhir + 1).getCell(1).value, null);
+
+    // Lebar kolom + pengaturan cetak.
+    cek("lebar kolom", [1, 2, 3, 4].map((i) => ws.getColumn(i).width), [10, 36, 10, 12]);
+    cek("kolom nama cukup untuk nama terpanjang (33)", ws.getColumn(2).width! >= 33, true);
+    const ps = ws.pageSetup as any;
+    cek("kertas A4", ps.paperSize, 9);
+    cek("orientasi portrait", ps.orientation, "portrait");
+    cek("muat 1 halaman", ps.fitToWidth, 1);
+    cek(`printArea A1:D${barisAkhir}`, ps.printArea, `A1:D${barisAkhir}`);
+
+    // Kelas juga ikut di nama berkas supaya unduhan tidak tertimpa.
+    const res9 = await getExportRanking(req("/api/export/ranking?kelas=9"));
+    cekBenar(
+      "nama berkas kelas 9 berbeda",
+      (res9.headers.get("content-disposition") ?? "").includes("ranking_nilai_kelas_9_ASTS_GANJIL_2026-2027.xlsx")
+    );
+
+    const tanpaKelasXlsx = await getExportRanking(req("/api/export/ranking"));
+    cek("export tanpa kelas = 400", tanpaKelasXlsx.status, 400);
+  }
 }
 
 console.log("\n=== mapel: daftar, tambah, dan dampaknya ===");

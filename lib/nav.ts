@@ -2,6 +2,7 @@ import {
   BookOpenText,
   ClipboardList,
   TrendingUp,
+  Trophy,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -20,6 +21,12 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Nilai",
     description: "Lihat dan perbarui nilai ASTS",
     icon: ClipboardList,
+  },
+  {
+    href: "/ranking",
+    label: "Ranking",
+    description: "Peringkat siswa per kelas",
+    icon: Trophy,
   },
   {
     href: "/siswa",

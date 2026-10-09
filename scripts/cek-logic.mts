@@ -3,6 +3,7 @@
 import { deskripsiNilai, predikat, predikatDenganKeterangan } from "../lib/predikat.ts";
 import { urutanMapel, urutanSiswa, bisaPindahKelas, URUTAN_KELAS } from "../lib/urutan.ts";
 import { namaSheet, sanitizeFilename } from "../lib/nama-sheet.ts";
+import { hitungRanking, rataKelas } from "../lib/ranking.ts";
 
 let gagal = 0;
 
@@ -169,6 +170,86 @@ console.log("\n--- kop raport: pasangan label + nilai ---");
   cek("kolom C cukup untuk label 'kelas/semester' (14)", 16 >= 14, true);
   cek("kolom A cukup untuk label terpanjang (4)", 12 >= 4, true);
 }
+
+console.log("\n--- ranking: rata-rata, urutan, dan peringkat seri ---");
+{
+  /** Bantu: satu siswa dengan daftar nilai akhir per mapel. */
+  const nilai = (siswaId: number, nama: string, daftar: number[], kelas = "7A") =>
+    daftar.map((nilai_akhir) => ({ siswaId, nama, kelas, nilai_akhir }));
+
+  // 4 mapel: 80, 70, 60, 50 -> rata 65
+  const ahmad = nilai(1, "AHMAD", [80, 70, 60, 50]);
+  // 4 mapel: 90, 80, 70, 60 -> rata 75
+  const siti = nilai(2, "SITI", [90, 80, 70, 60]);
+  // 4 mapel: 70, 60, 50, 40 -> rata 55
+  const ucok = nilai(3, "UCOK", [70, 60, 50, 40]);
+
+  const r = hitungRanking([...ucok, ...siti, ...ahmad]);
+
+  cek("jumlah baris = jumlah siswa unik", r.length, 3);
+  cek("urut dari rata-rata tertinggi", r.map((x) => x.nama), ["SITI", "AHMAD", "UCOK"]);
+  cek("peringkat 1, 2, 3 tanpa seri", r.map((x) => x.peringkat), [1, 2, 3]);
+  cek("rata-rata satu desimal", r.map((x) => x.rata), [75, 65, 55]);
+  cek("total tersimpan utuh", r.map((x) => x.total), [300, 260, 220]);
+  cek("jumlahMapel per siswa", r.map((x) => x.jumlahMapel), [4, 4, 4]);
+
+  // Seri: AHMAD dan BUDI sama-sama 65 -> keduanya peringkat 2, lalu UCOK (55)
+  // melompat ke peringkat 4.
+  const seri = hitungRanking([
+    ...siti,
+    ...ahmad,
+    ...nilai(4, "BUDI", [80, 70, 60, 50]),
+    ...ucok,
+  ]);
+  cek("dua siswa seri memakai peringkat sama", seri.map((x) => x.peringkat), [1, 2, 2, 4]);
+  cek("seri diurutkan nama abjad", seri.filter((x) => x.peringkat === 2).map((x) => x.nama), [
+    "AHMAD",
+    "BUDI",
+  ]);
+
+  // Tiga seri berurutan: 1, 2, 2, 2, 5.
+  const seriTiga = hitungRanking([
+    ...nilai(1, "A", [90, 80, 70, 60]),
+    ...nilai(2, "B", [80, 70, 60, 50]),
+    ...nilai(3, "C", [80, 70, 60, 50]),
+    ...nilai(4, "D", [80, 70, 60, 50]),
+    ...nilai(5, "E", [40, 30, 20, 10]),
+  ]);
+  cek("tiga seri berurutan melompat ke 5", seriTiga.map((x) => x.peringkat), [1, 2, 2, 2, 5]);
+
+  // Peringkat comparing dari rata-rata SUDAH dibulatkan: 60.04 dan 60.02
+  // sama-sama tampil 60.0, jadi keduanya seri (bukan 1 dan 2).
+  const bulat = hitungRanking([
+    ...nilai(1, "X", [60.04, 60.04, 60.04, 60.04]),
+    ...nilai(2, "Y", [60.02, 60.02, 60.02, 60.02]),
+  ]);
+  cek("pembulatan dilakukan sebelum peringkat", bulat.map((x) => x.peringkat), [1, 1]);
+  cek("kedua rata-rata tampil sama", bulat.map((x) => x.rata), [60, 60]);
+
+  // Kasus batas.
+  cek("baris kosong -> ranking kosong", hitungRanking([]), []);
+  cek("satu siswa -> peringkat 1", hitungRanking(ahmad).map((x) => x.peringkat), [1]);
+  cek("nilai 0 tetap dihitung (bukan dianggap kosong)", hitungRanking(nilai(1, "Z", [0, 0, 0, 0]))[0].rata, 0);
+  cek("jumlahMapel 0 tidak menghasilkan NaN", hitungRanking(nilai(1, "Z", [0])).length, 1);
+
+  // Nama dengan huruf besar/kecil berbeda tetap urut dengan benar.
+  const huruf = hitungRanking([
+    ...nilai(1, "budi", [70, 70, 70, 70]),
+    ...nilai(2, "AHMAD", [70, 70, 70, 70]),
+  ]);
+  cek("urut seri abjad tidak peka huruf besar/kecil", huruf.map((x) => x.nama), ["AHMAD", "budi"]);
+}
+
+console.log("\n--- rata-rata kelas ---");
+cek("rata kelas kosong = 0", rataKelas([]), 0);
+cek(
+  "rata kelas satu desimal",
+  rataKelas([
+    { peringkat: 1, siswaId: 1, nama: "A", kelas: "7A", jumlahMapel: 2, total: 150, rata: 75 },
+    { peringkat: 2, siswaId: 2, nama: "B", kelas: "7A", jumlahMapel: 2, total: 130, rata: 65 },
+  ]),
+  70
+);
 
 console.log("\n--- area cetak Excel dihitung dari jumlah baris ---");
 // lib/excel.ts memakai A1:D${4 + jumlahBaris}; dengan 16 mapel hasilnya A1:D20.
