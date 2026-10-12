@@ -81,7 +81,7 @@ npm run dev
 | `npm run db:migrate` | Menjalankan berkas SQL di `db/` |
 | `npm run lint` | ESLint |
 | `npm run cek:logic` | Uji logika murni: predikat, urutan mapel & siswa, nama sheet, perpindahan kelas |
-| `npm run cek:api` | Uji end-to-end handler API terhadap database lokal dari seed (80 pemeriksaan) |
+| `npm run cek:api` | Uji end-to-end handler API terhadap database lokal dari seed (513 pemeriksaan) |
 | `npm run cek:siapkan` | Menyiapkan ulang `scripts/cek-api.sqlite` dari seed + migrasi |
 
 `cek:api` membuat salinan database uji sendiri di `scripts/cek-api.sqlite`, jadi tidak

@@ -16,7 +16,7 @@ const PILIHAN = [
   { nilai: "system", label: "Ikuti sistem", icon: Monitor },
 ] as const;
 
-export function ThemeToggle() {
+export function ThemeToggle({ className }: { className?: string }) {
   const { theme, setTheme } = useTheme();
   // `theme` bernilai `undefined` sampai provider ter-hydrate. Menandainya
   // aktif lebih awal akan menandai item yang salah untuk sesaat.
@@ -26,7 +26,12 @@ export function ThemeToggle() {
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button variant="ghost" size="icon" aria-label="Ubah tema tampilan" />
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Ubah tema tampilan"
+            className={className}
+          />
         }
       >
         <Sun className="size-4 scale-100 rotate-0 transition-transform dark:scale-0 dark:-rotate-90" />

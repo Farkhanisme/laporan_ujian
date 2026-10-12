@@ -41,6 +41,7 @@ const { GET: getRingkasan } = await import("../app/api/export/ringkasan/route");
 const { GET: getRanking } = await import("../app/api/ranking/route");
 const { GET: getExportRanking } = await import("../app/api/export/ranking/route");
 const { GET: getExportPeringkat } = await import("../app/api/export/peringkat/route");
+const { GET: getExportNilaiMapel } = await import("../app/api/export/nilai-mapel/route");
 const { GET: getPredikat, PUT: putPredikat, DELETE: deletePredikat } = await import(
   "../app/api/predikat/route"
 );
@@ -1537,6 +1538,191 @@ console.log("\n=== ekspor peringkat: semua siswa, kolom per mapel ===");
   cek("fitToHeight 0 (tinggi bebas)", ps.fitToHeight, 0);
   cek(`printArea A1:${kolomKe(kolomAkhir)}${barisAkhir}`, ps.printArea, `A1:${kolomKe(kolomAkhir)}${barisAkhir}`);
   cek("header diulang tiap halaman", ps.printTitlesRow, "1:1");
+}
+
+console.log("\n=== ekspor nilai per mapel: satu kelas, satu mapel, satu sheet ===");
+{
+  // Kelas 7A dipakai karena siswanya paling sedikit, jadi sheet-nya paling
+  // ringkas untuk diperiksa. Jumlah siswa dibaca dari database, bukan ditulis
+  // di kode, karena uji sebelumnya memindahkan siswa antar kelas.
+  const kelasUji = "7A";
+  const mapelUji = "Matematika";
+  const { siswa: siswaUji } = await (async () => {
+    const r = await db.execute({
+      sql: "SELECT COUNT(*) AS siswa FROM siswa WHERE kelas = ?",
+      args: [kelasUji],
+    });
+    return { siswa: Number((r.rows[0] as unknown as { siswa: number }).siswa) };
+  })();
+  const barisAkhir = siswaUji + 1;
+
+  const res = await getExportNilaiMapel(
+    req(`/api/export/nilai-mapel?kelas=${kelasUji}&mapel=${encodeURIComponent(mapelUji)}`)
+  );
+  cek("GET /api/export/nilai-mapel ok", res.status, 200);
+  cek(
+    "tipe konten xlsx",
+    res.headers.get("content-type"),
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  cekBenar(
+    "nama berkas memuat kelas dan mapel",
+    (res.headers.get("content-disposition") ?? "").includes(
+      "nilai_kelas_7A_Matematika_ASTS_GANJIL_2026-2027.xlsx"
+    )
+  );
+
+  const buf = Buffer.from(await res.arrayBuffer());
+  cek("menghasilkan .xlsx (PK zip)", buf.subarray(0, 2).toString(), "PK");
+
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf as any);
+  const ws = wb.worksheets[0];
+  const g = (a: string) => ws.getCell(a).value;
+
+  cek("satu sheet", wb.worksheets.length, 1);
+  cek("nama sheet menyebut mapel dan kelas", ws.name, `Nilai ${mapelUji} Kelas ${kelasUji}`);
+
+  // Sheet tanpa kop: judul kolom langsung di baris 1.
+  // NO | NAMA | NISN | KELAS | MAPEL | NILAI ASLI | NILAI DONGKRAK | NILAI AKHIR | PREDIKAT
+  cek("A1 = NO", g("A1"), "NO");
+  cek("B1 = NAMA", g("B1"), "NAMA");
+  cek("C1 = NISN", g("C1"), "NISN");
+  cek("D1 = KELAS", g("D1"), "KELAS");
+  cek("E1 = MAPEL", g("E1"), "MAPEL");
+  cek("F1 = NILAI ASLI", g("F1"), "NILAI ASLI");
+  cek("G1 = NILAI DONGKRAK", g("G1"), "NILAI DONGKRAK");
+  cek("H1 = NILAI AKHIR", g("H1"), "NILAI AKHIR");
+  cek("I1 = PREDIKAT", g("I1"), "PREDIKAT");
+  cek("header bold", ws.getCell("A1").font?.bold, true);
+  cek("jumlah kolom = 9", ws.columnCount, 9);
+  cek(`jumlah baris = ${barisAkhir} (1 header + ${siswaUji} siswa)`, ws.rowCount, barisAkhir);
+  cek(`tidak ada baris ke-${barisAkhir + 1}`, ws.getRow(barisAkhir + 1).getCell(1).value, null);
+
+  // Isi export harus identik dengan yang tampil di halaman Nilai untuk kelas +
+  // mapel yang sama.
+  const layar = (
+    (await (
+      await getNilai(req(`/api/nilai?kelas=${kelasUji}&mapel=${encodeURIComponent(mapelUji)}`))
+    ).json()) as { data: Array<Record<string, unknown>> }
+  ).data;
+  const kolom = (c: number) => Array.from({ length: siswaUji }, (_, i) => ws.getCell(i + 2, c).value);
+
+  cek("jumlah baris = baris di layar", layar.length, siswaUji);
+  cek("nama export sama dengan di layar", kolom(2), layar.map((r) => r.siswa));
+  cek("nilai asli export sama dengan di layar", kolom(6), layar.map((r) => r.nilai_asli));
+  cek("nilai akhir export sama dengan di layar", kolom(8), layar.map((r) => r.nilai_akhir));
+  cek("predikat export sama dengan di layar", kolom(9), layar.map((r) => r.predikat));
+  cek(
+    "predikat export = huruf A/B/C/D",
+    kolom(9).every((v) => v === "A" || v === "B" || v === "C" || v === "D"),
+    true
+  );
+  // Semua baris harus kelas dan mapel yang sama karena satu berkas = satu
+  // kombinasi kelas + mapel.
+  cek(`semua baris kelas ${kelasUji}`, kolom(4).every((v) => v === kelasUji), true);
+  cek(`semua baris mapel ${mapelUji}`, kolom(5).every((v) => v === mapelUji), true);
+  cek("NO berurutan", kolom(1), Array.from({ length: siswaUji }, (_, i) => i + 1));
+
+  // Hanya nilai mapel ini yang boleh muncul: kolom MAPEL harus sama sekali
+  // tidak memuat mapel lain.
+  const mapelLain = Array.from(
+    new Set(
+      (
+        (
+          await (await getNilai(req(`/api/nilai?kelas=${kelasUji}`))).json()
+        ) as { data: Array<{ mapel: string }> }
+      ).data.map((r) => r.mapel)
+    )
+  );
+  cek("nilai disaring ke mapel terpilih", mapelLain.includes(mapelUji), true);
+  cek("mapel yang tampil di sheet bukan mapel lain", kolom(5).every((v) => v === mapelUji), true);
+
+  // Lebar kolom + pengaturan cetak.
+  cek("lebar kolom", [1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => ws.getColumn(i).width), [
+    6, 36, 12, 8, 26, 11, 16, 12, 11,
+  ]);
+  cek("kolom nama cukup untuk nama terpanjang (33)", ws.getColumn(2).width! >= 33, true);
+  cek(
+    "kolom mapel cukup untuk nama terpanjang",
+    ws.getColumn(5).width! >= "Sejarah Kebudayaan Islam".length,
+    true
+  );
+  const ps = ws.pageSetup as any;
+  cek("kertas A4", ps.paperSize, 9);
+  cek("orientasi portrait", ps.orientation, "portrait");
+  cek("muat 1 halaman", ps.fitToWidth, 1);
+  cek(`printArea A1:I${barisAkhir}`, ps.printArea, `A1:I${barisAkhir}`);
+
+  // Nama mapel berispasi jadi garis bawah di nama berkas.
+  const mapelSpasi = "Bahasa Indonesia";
+  const resSpasi = await getExportNilaiMapel(
+    req(`/api/export/nilai-mapel?kelas=${kelasUji}&mapel=${encodeURIComponent(mapelSpasi)}`)
+  );
+  cekBenar(
+    "spasi pada nama mapel diganti garis bawah",
+    (resSpasi.headers.get("content-disposition") ?? "").includes(
+      "nilai_kelas_7A_Bahasa_Indonesia_ASTS_GANJIL_2026-2027.xlsx"
+    )
+  );
+
+  // Kelas dan mapel wajib diisi.
+  const tanpaKelas = await getExportNilaiMapel(
+    req(`/api/export/nilai-mapel?mapel=${encodeURIComponent(mapelUji)}`)
+  );
+  cek("export tanpa kelas = 400", tanpaKelas.status, 400);
+  cek("pesan tanpa kelas", (await json(tanpaKelas)).error, "Parameter kelas wajib diisi.");
+
+  const tanpaMapel = await getExportNilaiMapel(req(`/api/export/nilai-mapel?kelas=${kelasUji}`));
+  cek("export tanpa mapel = 400", tanpaMapel.status, 400);
+  cek("pesan tanpa mapel", (await json(tanpaMapel)).error, "Parameter mapel wajib diisi.");
+
+  const mapelKosong = await getExportNilaiMapel(
+    req(`/api/export/nilai-mapel?kelas=${kelasUji}&mapel=%20%20`)
+  );
+  cek("mapel spasi doang = 400", mapelKosong.status, 400);
+
+  // Kombinasi yang tidak ada -> sheet kosong, bukan error.
+  const mapelNgawur = await getExportNilaiMapel(
+    req("/api/export/nilai-mapel?kelas=7A&mapel=Tata+Boga")
+  );
+  cek("mapel tidak dikenal = 200", mapelNgawur.status, 200);
+  const wbKosong = new ExcelJS.Workbook();
+  await wbKosong.xlsx.load(Buffer.from(await mapelNgawur.arrayBuffer()) as any);
+  const wsKosong = wbKosong.worksheets[0];
+  cek("sheet kosong tetap punya header", wsKosong.getCell("A1").value, "NO");
+  cek("sheet kosong tidak punya baris data", wsKosong.rowCount, 1);
+
+  // Kolom NILAI DONGKRAK harus berisi angka hasil aturan yang berlaku, dan
+  // kosong untuk nilai yang tidak terkena aturan.
+  {
+    const target = 30;
+    await postDongkrak(bodyReq("/api/dongkrak", { nilai_awal: 0, nilai_akhir: 30, nilai_target: target }));
+
+    const resD = await getExportNilaiMapel(
+      req(`/api/export/nilai-mapel?kelas=${kelasUji}&mapel=${encodeURIComponent(mapelUji)}`)
+    );
+    const wbD = new ExcelJS.Workbook();
+    await wbD.xlsx.load(Buffer.from(await resD.arrayBuffer()) as any);
+    const wsD = wbD.worksheets[0];
+
+    const asli = Array.from({ length: siswaUji }, (_, i) => Number(wsD.getCell(i + 2, 6).value));
+    const dongkrakKolom = Array.from({ length: siswaUji }, (_, i) => wsD.getCell(i + 2, 7).value);
+    const akhir = Array.from({ length: siswaUji }, (_, i) => Number(wsD.getCell(i + 2, 8).value));
+
+    cek(
+      "dongkrak terisi untuk nilai yang masuk aturan",
+      dongkrakKolom.every((v, i) => (asli[i] <= 30 ? v === target : v === null)),
+      true
+    );
+    cek(
+      "nilai akhir = dongkrak kalau ada, nilai asli kalau tidak",
+      akhir.every((v, i) => v === (asli[i] <= 30 ? target : asli[i])),
+      true
+    );
+
+    await deleteDongkrak(req("/api/dongkrak"));
+  }
 }
 
 console.log("\n=== pengaturan predikat: batas bawah, batas tuntas, dan dampaknya ===");

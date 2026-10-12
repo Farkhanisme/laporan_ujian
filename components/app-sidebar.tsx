@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { NAV_ITEMS, navAktif } from "@/lib/nav";
 import { NAMA_MADRASAH, SEMESTER, TAHUN_AJARAN } from "@/lib/config";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { cn } from "@/lib/utils";
 
 export function BrandMark({ ringkas = false }: { ringkas?: boolean }) {
@@ -67,9 +68,19 @@ export function AppSidebar({ onNavigasi }: { onNavigasi?: () => void }) {
         </ul>
       </nav>
 
-      <p className="border-t border-sidebar-border pt-3 text-xs text-muted-foreground">
-        {TAHUN_AJARAN} · Semester {SEMESTER}
-      </p>
+      {/* Toggle tema hanya di sidebar layar besar. `AppSidebar` juga dipakai
+          di drawer mobile, sedangkan `MobileTopBar` sudah punya tombolnya
+          sendiri — batas `lg` mencegah keduanya muncul sekaligus. */}
+      <div className="hidden flex-col gap-2 border-t border-sidebar-border pt-3 lg:flex">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground">
+            {TAHUN_AJARAN} · Semester {SEMESTER}
+          </p>
+          {/* Hover memakai palet sidebar supaya tombolnya menyatu dengan
+              latar `bg-sidebar`, bukan warna `muted` milik area konten. */}
+          <ThemeToggle className="text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" />
+        </div>
+      </div>
     </div>
   );
 }

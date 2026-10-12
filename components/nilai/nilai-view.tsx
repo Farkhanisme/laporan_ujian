@@ -37,6 +37,7 @@ import {
   Calculator,
   ClipboardList,
   Download,
+  FileSpreadsheet,
   Loader2,
   Minus,
   Save,
@@ -64,6 +65,7 @@ export function NilaiView({ mapelAwal }: { mapelAwal?: string }) {
   const [batas, setBatas] = useState<BatasPredikat>(BATAS_AWAL);
   const [saving, setSaving] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [downloadingMapel, setDownloadingMapel] = useState(false);
   const [downloadingRingkasan, setDownloadingRingkasan] = useState(false);
   const [halaman, setHalaman] = useState(1);
   const [tampilan, setTampilan] = useState<Tampilan>("daftar");
@@ -219,9 +221,11 @@ export function NilaiView({ mapelAwal }: { mapelAwal?: string }) {
 
   const modeSiswaTunggal = siswaId !== "semua";
 
-  // Isi cepat butuh tepat satu mapel: tanpa itu tidak ada satu kolom angka
-  // yang bisa diisi berurutan seperti daftar skor.
-  const bisaIsiCepat = mapel !== SEMUA_MAPEL;
+  // Isi cepat dan unduh nilai mapel sama-sama butuh tepat satu mapel: tanpa itu
+  // tidak ada satu kolom angka yang bisa diisi berurutan seperti daftar skor,
+  // dan tidak ada mapel tunggal yang bisa jadi isi satu berkas.
+  const satuMapelTerpilih = mapel !== SEMUA_MAPEL;
+  const bisaIsiCepat = satuMapelTerpilih;
 
   // Mengganti kelas/siswa/mapel selalu menutup mode isi cepat supaya tidak
   // tertinggal menunjuk data yang sudah tidak tampil.
@@ -362,6 +366,36 @@ export function NilaiView({ mapelAwal }: { mapelAwal?: string }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [jumlahDiubah, saving, simpan]);
 
+  /**
+   * Unduh nilai satu mapel untuk kelas yang sedang aktif.
+   *
+   * Mengikuti filter kelas + mapel saja. Filter siswa sengaja diabaikan:
+   * di mode satu siswa yang sudah ada tombol Unduh Raport, dan berkas ini
+   * meantinya "nilai satu mapel untuk seluruh kelas".
+   */
+  async function unduhPerMapel() {
+    if (mapel === SEMUA_MAPEL) return;
+
+    setDownloadingMapel(true);
+    try {
+      const params = new URLSearchParams({ kelas, mapel });
+      const res = await fetch(`/api/export/nilai-mapel?${params.toString()}`);
+      if (!res.ok) throw new Error("Gagal membuat file.");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `nilai_kelas_${kelas}_${mapel.replace(/\s+/g, "_")}_ASTS_GANJIL_2026-2027.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Nilai ${mapel} kelas ${kelas} berhasil diunduh.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Gagal mengunduh.");
+    } finally {
+      setDownloadingMapel(false);
+    }
+  }
+
   async function unduhSemua() {
     setDownloading(true);
     try {
@@ -495,6 +529,30 @@ export function NilaiView({ mapelAwal }: { mapelAwal?: string }) {
               </button>
             </div>
           )}
+
+          {/* Hanya di mode daftar: di mode satu siswa sudah ada Unduh Raport,
+              dan isinya bukan "nilai satu mapel se-Kelas". */}
+          {!modeSiswaTunggal ? (
+            <Button
+              variant="outline"
+              onClick={unduhPerMapel}
+              disabled={downloadingMapel || !satuMapelTerpilih}
+              // Disabled tanpa penjelasan membingungkan, jadi alasannya ditulis
+              // di title — sama seperti tombol Isi cepat.
+              title={
+                satuMapelTerpilih
+                  ? `Unduh nilai ${mapel} untuk kelas ${kelas}`
+                  : "Pilih satu mata pelajaran terlebih dahulu"
+              }
+            >
+              {downloadingMapel ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="size-4" />
+              )}
+              Unduh Nilai Mapel
+            </Button>
+          ) : null}
 
           <Button variant="outline" onClick={unduhRingkasan} disabled={downloadingRingkasan}>
             {downloadingRingkasan ? (
